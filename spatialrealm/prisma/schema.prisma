@@ -21,4 +21,15 @@ model User {
   avatar    String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  workspace workspace[] @relation("WorkspaceUsers")
+}
+
+model workspace {
+  id        String   @id @default(cuid())
+  name      String
+  image     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  users     User[]   @relation("WorkspaceUsers")
 }

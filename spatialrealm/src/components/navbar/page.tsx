@@ -9,47 +9,121 @@ import {
   DropdownMenuLabel,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { signOut } from "next-auth/react";
+import {
+  Sheet,
+  SheetClose,
+  SheetContent,
+  SheetDescription,
+  SheetFooter,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from "@/components/ui/sheet"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import { signOut, useSession } from "next-auth/react";
+import { useRouter } from "next/navigation";
+import { useRef, useState } from "react";
 
 export default function Navbar() {
+  const router = useRouter();
+const nameRef = useRef<HTMLInputElement>(null);
+const [creating, setCreating] = useState(false);
+  const { data: session, status } = useSession();
 
+  const createWorkspace = async () => {
+  const name = nameRef.current?.value?.trim();
 
+  if (!name) {
+    alert("Please enter a workspace name.");
+    return;
+  }
+
+  setCreating(true);
+
+  try {
+    const res = await fetch("/api/createworkspace", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ name }),
+    });
+
+    const data = await res.json();
+
+    if (data.success && data.workspace?.id) {
+      router.push(`/workspace/${data.workspace.id}`);
+    } else {
+      console.error("Workspace creation failed", data);
+      alert("Failed to create workspace.");
+    }
+  } catch (err) {
+    console.error("Error:", err);
+    alert("An error occurred.");
+  } finally {
+    setCreating(false);
+  }
+};
   return (
     <>
-    <section>
+      <section>
         <nav className="flex items-center justify-between  text-white shadow-2xl">
           <div className="flex items-center ml-4">
             <Link href="/">
-            <Image
-              src="/images/logo.png"
-              alt="Spatial Realm Logo"
-              width={100}
-              height={100}
-            />
+              <Image
+                src="/images/logo.png"
+                alt="Spatial Realm Logo"
+                width={100}
+                height={100}
+              />
             </Link>
           </div>
           <div className="flex space-x-4 mr-4">
-            <Button variant="ghost" className="text-white font-bold hover:bg-gray-600">
-                <Link href="/">Create Space</Link>
-            </Button>
+            <Sheet >
+              <SheetTrigger asChild >
+                <Button variant="ghost" className="text-white font-bold hover:bg-gray-600">Create Workspace</Button>
+              </SheetTrigger>
+              <SheetContent side="right" className="w-[400px] sm:w-[540px]">
+                <SheetHeader>
+                  <SheetTitle>Creating your Space</SheetTitle>
+                </SheetHeader>
+                <div className="grid flex-1 auto-rows-min gap-6 px-4">
+                  <div className="grid gap-3">
+                    <Label htmlFor="sheet-demo-name">Name</Label>
+                    <Input id="sheet-demo-name" ref={nameRef} placeholder="Enter workspace name" />
+                  </div>
+                </div>
+                <SheetFooter>
+                  <Button type="submit" variant="ghost" className="text-white font-bold hover:bg-gray-600" onClick={createWorkspace}>Create Workspace</Button>
+                  <SheetClose asChild>
+                    <Button variant="ghost" className="text-white font-bold hover:bg-gray-600">Close</Button>
+                  </SheetClose>
+                </SheetFooter>
+              </SheetContent>
+            </Sheet>
             <DropdownMenu>
 
-            <DropdownMenuTrigger >
-            <Button variant="ghost" className="text-white font-bold hover:bg-gray-600">
-              <Avatar>
-                  <AvatarImage src="https://github.com/shadcn.png" />
-                  <AvatarFallback></AvatarFallback>
-              </Avatar>
-                  <Link href="/about">User</Link>
-            </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent className="w-56" align="start">
-              <DropdownMenuLabel onClick={() => signOut({ callbackUrl: "/auth" })} className="cursor-pointer" >LogOut</DropdownMenuLabel>
-            </DropdownMenuContent>
+              <DropdownMenuTrigger >
+                <Button variant="ghost" className="text-white font-bold hover:bg-gray-600">
+                  <Avatar>
+                    <AvatarImage src="https://github.com/shadcn.png" />
+                    <AvatarFallback></AvatarFallback>
+                  </Avatar>
+                  {session?.user ? (
+                    <Link href="/about">{session.user.name}</Link>
+                  ) : (
+                    <p>user</p>
+                  )}
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent className="w-56" align="start">
+                <DropdownMenuLabel onClick={() => signOut({ callbackUrl: "/auth" })} className="cursor-pointer" >LogOut</DropdownMenuLabel>
+              </DropdownMenuContent>
             </DropdownMenu>
           </div>
         </nav>
-    </section>
+      </section>
     </>
   );
 }
