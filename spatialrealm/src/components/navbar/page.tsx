@@ -27,44 +27,44 @@ import { useRef, useState } from "react";
 
 export default function Navbar() {
   const router = useRouter();
-const nameRef = useRef<HTMLInputElement>(null);
-const [creating, setCreating] = useState(false);
+  const nameRef = useRef<HTMLInputElement>(null);
+  const [creating, setCreating] = useState(false);
   const { data: session, status } = useSession();
 
   const createWorkspace = async () => {
-  const name = nameRef.current?.value?.trim();
+    const name = nameRef.current?.value?.trim();
 
-  if (!name) {
-    alert("Please enter a workspace name.");
-    return;
-  }
-
-  setCreating(true);
-
-  try {
-    const res = await fetch("/api/createworkspace", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ name }),
-    });
-
-    const data = await res.json();
-
-    if (data.success && data.workspace?.id) {
-      router.push(`/workspace/${data.workspace.id}`);
-    } else {
-      console.error("Workspace creation failed", data);
-      alert("Failed to create workspace.");
+    if (!name) {
+      alert("Please enter a workspace name.");
+      return;
     }
-  } catch (err) {
-    console.error("Error:", err);
-    alert("An error occurred.");
-  } finally {
-    setCreating(false);
-  }
-};
+
+    setCreating(true);
+
+    try {
+      const res = await fetch("/api/createworkspace", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ name }),
+      });
+
+      const data = await res.json();
+
+      if (data.success && data.workspace?.id) {
+        router.push(`/workspace/${data.workspace.id}`);
+      } else {
+        console.error("Workspace creation failed", data);
+        alert("Failed to create workspace.");
+      }
+    } catch (err) {
+      console.error("Error:", err);
+      alert("An error occurred.");
+    } finally {
+      setCreating(false);
+    }
+  };
   return (
     <>
       <section>
@@ -104,16 +104,16 @@ const [creating, setCreating] = useState(false);
             </Sheet>
             <DropdownMenu>
 
-              <DropdownMenuTrigger >
+              <DropdownMenuTrigger asChild>
                 <Button variant="ghost" className="text-white font-bold hover:bg-gray-600">
                   <Avatar>
                     <AvatarImage src="https://github.com/shadcn.png" />
-                    <AvatarFallback></AvatarFallback>
+                    <AvatarFallback />
                   </Avatar>
                   {session?.user ? (
-                    <Link href="/about">{session.user.name}</Link>
+                    <span className="ml-2">{session.user.name}</span>
                   ) : (
-                    <p>user</p>
+                    <span className="ml-2">User</span>
                   )}
                 </Button>
               </DropdownMenuTrigger>
