@@ -9,8 +9,11 @@
   "license": "ISC",
   "description": "",
   "dependencies": {
+    "body-parser": "^2.2.0",
     "express": "^5.1.0",
     "http": "^0.0.1-security",
+    "nodemon": "^3.1.10",
+    "peer": "^1.0.2",
     "socket.io": "^4.8.1",
     "ts-node": "^10.9.2",
     "typescript": "^5.8.3"

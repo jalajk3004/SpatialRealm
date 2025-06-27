@@ -3,7 +3,6 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-// backend/index.ts
 const express_1 = __importDefault(require("express"));
 const http_1 = __importDefault(require("http"));
 const socket_io_1 = require("socket.io");
@@ -14,18 +13,26 @@ const io = new socket_io_1.Server(server, {
         origin: "*",
     },
 });
+// room ID => Set of peer usernames (for call)
 const roomUsers = new Map();
+// socket ID => peer username (to clean up later)
+const socketToUsername = new Map();
 io.on("connection", (socket) => {
     console.log("✅ A user connected:", socket.id);
-    socket.on("room:join", ({ room, username }) => {
+    socket.on('room:join', ({ room, peerId }) => {
         var _a, _b;
         socket.join(room);
-        if (username !== "Anonymous") {
-            socket.to(room).emit("user:joined", { username });
-        }
+        socketToUsername.set(socket.id, peerId);
+        // Notify others in the room (for call)
+        socket.to(room).emit("user:joined", { peerId });
+        // Send existing peer usernames to the new user (for call)
+        const users = Array.from(roomUsers.get(room) || []).filter((user) => user !== peerId);
+        socket.emit("room:existing-users", { users });
+        // Track users per room (for call)
         if (!roomUsers.has(room))
             roomUsers.set(room, new Set());
-        (_a = roomUsers.get(room)) === null || _a === void 0 ? void 0 : _a.add(socket.id);
+        (_a = roomUsers.get(room)) === null || _a === void 0 ? void 0 : _a.add(peerId);
+        // Chat functionality (unchanged)
         const count = ((_b = roomUsers.get(room)) === null || _b === void 0 ? void 0 : _b.size) || 1;
         io.to(room).emit("room:userCount", { count });
     });
@@ -36,9 +43,11 @@ io.on("connection", (socket) => {
         for (const room of socket.rooms) {
             if (room === socket.id)
                 continue;
+            // Get peer ID (username) from socket ID
+            const username = socketToUsername.get(socket.id);
             const userSet = roomUsers.get(room);
-            if (userSet) {
-                userSet.delete(socket.id);
+            if (userSet && username) {
+                userSet.delete(username);
                 const count = userSet.size;
                 io.to(room).emit("room:userCount", { count });
             }
@@ -46,6 +55,7 @@ io.on("connection", (socket) => {
     });
     socket.on("disconnect", () => {
         console.log("🛑 Disconnected:", socket.id);
+        socketToUsername.delete(socket.id);
     });
 });
 app.use(express_1.default.json());

@@ -9,8 +9,7 @@ import { useParams } from "next/navigation";
 export const Chat = () => {
   const { data: session } = useSession();
   const params = useParams();
-  console.log("params:", params);
-  const room = params?.id as string;
+  const room = params?.game as string;
   const username = session?.user?.name || "Anonymous";
 
   const [messages, setMessages] = useState<{ sender: string; message: string }[]>([]);
@@ -49,11 +48,11 @@ export const Chat = () => {
   };
 
   return (
-    <div className="fixed bottom-4 right-4 w-[320px] h-[500px] bg-white/90 rounded-xl shadow-2xl flex flex-col overflow-hidden border border-gray-200 backdrop-blur-md">
+    <div className="fixed top-4 bottom-4 right-4 w-[320px] bg-white/90 rounded-xl shadow-2xl flex flex-col overflow-hidden border border-gray-200 backdrop-blur-md">
     {/* Header */}
     <div className="p-4 bg-gray-100 border-b font-semibold text-gray-700 flex justify-between items-center">
       <span>Live Chat</span>
-      <span className="text-xs text-gray-500">{userCount} online</span>
+      
     </div>
 
     {/* Scrollable messages */}
