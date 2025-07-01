@@ -11,6 +11,7 @@ export const Chat = () => {
   const params = useParams();
   const room = params?.game as string;
   const username = session?.user?.name || "Anonymous";
+  
 
   const [messages, setMessages] = useState<{ sender: string; message: string }[]>([]);
   const [input, setInput] = useState<string>("");
