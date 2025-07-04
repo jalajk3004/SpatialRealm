@@ -11,6 +11,7 @@ import {
 import Peer, { MediaConnection } from "peerjs";
 import { socket } from "@/lib/socketclient";
 import { useParams } from "next/navigation";
+import { useSession } from "next-auth/react";
 
 interface RoomContextType {
   socket: typeof socket;
@@ -35,6 +36,8 @@ export const useRoom = (): RoomContextType => {
 export const RoomProvider = ({ children }: { children: ReactNode }) => {
   const params = useParams();
   const roomId = params?.game as string;
+  const session = useSession();
+  const userId = session.data?.user?.email || "guest";
 
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [remoteStreams, setRemoteStreams] = useState<MediaStream[]>([]);
@@ -49,10 +52,13 @@ export const RoomProvider = ({ children }: { children: ReactNode }) => {
   const activePeerIds = useRef<Set<string>>(new Set());
   const peerStreamsRef = useRef<Record<string, MediaStream>>({});
   useEffect(() => {
-    if (!roomId) {
-      setError("Room ID is required");
+    if (!roomId || !session.data?.user?.email) {
+      if (!roomId) setError("Room ID is required");
       return;
     }
+
+    // Connect socket with authentication
+    socket.connect(userId);
 
     const initializePeer = async () => {
       try {
@@ -153,7 +159,7 @@ export const RoomProvider = ({ children }: { children: ReactNode }) => {
     const handleBeforeUnload = () => {
       if (currentPeerIdRef.current && roomId) {
         // Send immediate disconnect notification
-        socket.volatile.emit("user:force-disconnect", {
+        socket.emit("user:force-disconnect", {
           room: roomId,
           peerId: currentPeerIdRef.current
         });
@@ -166,7 +172,7 @@ export const RoomProvider = ({ children }: { children: ReactNode }) => {
       socket.on("user:left", handleUserLeft);
 
       // Handle forced disconnects from other users
-      socket.on("user:force-disconnect", ({ peerId }) => {
+      socket.on("user:force-disconnect", ({ peerId }: { peerId: string }) => {
         console.log("Force disconnect detected for:", peerId);
         removePeerStream(peerId);
         activePeerIds.current.delete(peerId);
@@ -179,7 +185,7 @@ export const RoomProvider = ({ children }: { children: ReactNode }) => {
 
     const heartbeatInterval = setInterval(() => {
       if (currentPeerIdRef.current && roomId) {
-        socket.volatile.emit("heartbeat", {
+        socket.emit("heartbeat", {
           peerId: currentPeerIdRef.current,
           room: roomId
         });
@@ -191,10 +197,18 @@ export const RoomProvider = ({ children }: { children: ReactNode }) => {
     return () => {
       // Cleanup function
       window.removeEventListener("beforeunload", handleBeforeUnload);
+      clearInterval(heartbeatInterval);
+
+      // Clean up socket handlers
+      socket.off("room:existing-users", handleExistingUsers);
+      socket.off("user:joined", handleUserJoined);
+      socket.off("user:left", handleUserLeft);
+      socket.off("user:force-disconnect");
+      socketHandlersSetup.current = false;
 
       // Notify about our own disconnect
       if (currentPeerIdRef.current && roomId) {
-        socket.volatile.emit("user:force-disconnect", {
+        socket.emit("room:leave", {
           room: roomId,
           peerId: currentPeerIdRef.current
         });
@@ -225,11 +239,13 @@ export const RoomProvider = ({ children }: { children: ReactNode }) => {
       }
 
       setRemoteStreams([]);
+      setLocalStream(null);
       setIsConnected(false);
       currentPeerIdRef.current = "";
-      clearInterval(heartbeatInterval);
+      activePeerIds.current.clear();
+      peerStreamsRef.current = {};
     };
-  }, [roomId]);
+  }, [roomId, session.status]);
 
   const makeCall = (targetPeerId: string) => {
     if (!localStreamRef.current ||

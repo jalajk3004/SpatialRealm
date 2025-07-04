@@ -11,6 +11,7 @@ export const Call = () => {
 
   const [isMuted, setIsMuted] = useState(false);
   const [isVideoOff, setIsVideoOff] = useState(false);
+  const [streamMap, setStreamMap] = useState<Map<string, { stream: MediaStream, peerId?: string }>>(new Map());
 
   const toggleMute = () => {
     if (!localStream) return;
@@ -52,11 +53,15 @@ export const Call = () => {
     );
   }
 
+  // Better stream management with unique identification
   const allStreams = localStream ? [localStream, ...remoteStreams] : remoteStreams;
+  
+  // Filter out any null or undefined streams
+  const validStreams = allStreams.filter(stream => stream && stream.active);
 
   return (
     <div className="fixed top-4 left-4 w-[calc(100vw-320px-48px)] h-[25vh] bg-gray-900 rounded-xl shadow-2xl overflow-hidden border border-gray-700">
-      {allStreams.length === 0 ? (
+      {validStreams.length === 0 ? (
         <div className="w-full h-full flex items-center justify-center text-white">
           <div className="text-center">
             <div className="w-16 h-16 bg-gray-700 rounded-full flex items-center justify-center mx-auto mb-2">
@@ -70,18 +75,30 @@ export const Call = () => {
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2 w-full h-full p-2">
-          {allStreams.map((stream, idx) => (
+          {validStreams.map((stream, idx) => (
             <div
-              key={stream.id}
+              key={`${stream.id}-${idx}`}
               className="relative bg-gray-800 rounded-lg overflow-hidden group"
             >
               <video
                 ref={(el) => {
-                  if (el && stream) {
+                  if (el && stream && stream.active) {
                     el.srcObject = stream;
                     el.muted = idx === 0;
                     el.autoplay = true;
                     el.playsInline = true;
+                    
+                    // Handle stream ended event
+                    const handleStreamEnded = () => {
+                      console.log('Stream ended:', stream.id);
+                      el.srcObject = null;
+                    };
+                    
+                    stream.addEventListener('inactive', handleStreamEnded);
+                    
+                    return () => {
+                      stream.removeEventListener('inactive', handleStreamEnded);
+                    };
                   }
                 }}
                 className="w-full h-full object-cover"
@@ -132,8 +149,7 @@ export const Call = () => {
       )}
 
       <div className="absolute top-2 right-2 bg-black/50 text-white text-xs px-2 py-1 rounded">
-        {remoteStreams.length + (localStream ? 1 : 0)} participant
-        {allStreams.length !== 1 ? "s" : ""}
+        {validStreams.length} participant{validStreams.length !== 1 ? "s" : ""}
       </div>
     </div>
   );

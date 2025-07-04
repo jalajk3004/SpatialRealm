@@ -22,6 +22,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "dotenv": "^16.5.0",
+    "kaboom": "^3000.1.17",
     "konva": "^9.3.20",
     "lucide-react": "^0.518.0",
     "next": "15.3.2",
