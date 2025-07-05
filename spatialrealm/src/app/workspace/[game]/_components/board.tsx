@@ -47,7 +47,9 @@ export const Board = () => {
         // Leave previous private room if any
         if (previousArea !== null) {
           const privateRoomId = `${roomId}_private_${previousArea}`;
-          socket.emit("private:leave", { room: privateRoomId, playerId, publicRoom: roomId });
+          socket.emit("private:leave", { room: privateRoomId, playerId, publicRoom: roomId, areaId: previousArea });
+          // Emit event for video context to handle leaving private area
+          socket.emit("board:private-area-left");
           console.log(`🚪 Left private area ${previousArea}`);
         }
         
@@ -55,6 +57,8 @@ export const Board = () => {
         if (newAreaId !== null) {
           const privateRoomId = `${roomId}_private_${newAreaId}`;
           socket.emit("private:join", { room: privateRoomId, playerId, publicRoom: roomId, areaId: newAreaId });
+          // Emit event for video context to handle entering private area
+          socket.emit("board:private-area-entered", { areaId: newAreaId });
           console.log(`🔐 Joined private area ${newAreaId}`);
         }
         

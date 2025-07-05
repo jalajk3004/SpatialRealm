@@ -25,6 +25,7 @@ import { signOut, useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
 
+
 export default function Navbar() {
   const router = useRouter();
   const nameRef = useRef<HTMLInputElement>(null);
@@ -107,7 +108,7 @@ export default function Navbar() {
               <DropdownMenuTrigger asChild>
                 <Button variant="ghost" className="text-white font-bold hover:bg-gray-600">
                   <Avatar>
-                    <AvatarImage src="https://github.com/shadcn.png" />
+                    <AvatarImage src={session?.user?.image || "/default-avatar.png"} />
                     <AvatarFallback />
                   </Avatar>
                   {session?.user ? (

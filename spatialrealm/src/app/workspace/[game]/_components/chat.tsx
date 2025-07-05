@@ -103,7 +103,6 @@ export const Chat = () => {
       {/* Header */}
       <div className="p-4 bg-gray-100 border-b font-semibold text-gray-700 flex justify-between items-center">
         <span>{privateRoomId ? "Private Chat" : "Live Chat"}</span>
-        <span className="text-xs text-gray-500">{userCount} online</span>
       </div>
 
       {/* Messages */}

@@ -1,6 +1,7 @@
 import express from "express";
 import http from "http";
 import { Server } from "socket.io";
+import crypto from "crypto";
 
 const app = express();
 const server = http.createServer(app);
@@ -11,12 +12,29 @@ const io = new Server(server, {
 });
 
 // Trackers
-const roomUsers = new Map<string, Set<string>>();         // video/chat
+const roomUsers = new Map<string, Set<string>>();         // chat/video
 const roomPlayers = new Map<string, Set<string>>();       // board movement
 const playerPositions = new Map<string, { x: number; y: number }>();
-const playerCharacters = new Map<string, number>();       // player character assignments
+const playerCharacters = new Map<string, number>();
 const socketToUsername = new Map<string, string>();
 const userToSocketMap = new Map<string, string>();
+const privateRoomUsers = new Map<string, Set<string>>();  // private area users
+const userPrivateStatus = new Map<string, { inPrivate: boolean; areaId?: number; publicRoom?: string }>();
+const privateAreaKeys = new Map<string, string>();        // encryption keys for private areas
+const privatePeerIds = new Map<string, string>();         // userId -> privatePeerId mapping
+
+// Utility functions for private area management
+const generateEncryptionKey = (): string => {
+  return crypto.randomBytes(32).toString('hex');
+};
+
+const getOrCreatePrivateKey = (areaId: string): string => {
+  if (!privateAreaKeys.has(areaId)) {
+    privateAreaKeys.set(areaId, generateEncryptionKey());
+  }
+  return privateAreaKeys.get(areaId)!;
+};
+
 
 io.on("connection", (socket) => {
   const userId = socket.handshake.auth?.userId as string;
@@ -27,7 +45,6 @@ io.on("connection", (socket) => {
     return;
   }
 
-  // Disconnect previous socket if same user
   const existingSocketId = userToSocketMap.get(userId);
   if (existingSocketId && existingSocketId !== socket.id) {
     io.to(existingSocketId).emit("force-disconnect");
@@ -36,20 +53,48 @@ io.on("connection", (socket) => {
 
   userToSocketMap.set(userId, socket.id);
   socketToUsername.set(socket.id, userId);
+  
+  // Initialize private status
+  userPrivateStatus.set(userId, { inPrivate: false });
 
   console.log(`✅ User connected: ${userId} → ${socket.id}`);
+
+  // ---------------------- VIDEO SIGNAL ROOM JOIN ----------------------
+  socket.on("video:join-room", ({ room }) => {
+    socket.join(room);
+    console.log(`🎥 ${userId} joined video room: ${room}`);
+  });
+
+  socket.on("video:leave-room", ({ room }) => {
+    socket.leave(room);
+    console.log(`📤 ${userId} left video room: ${room}`);
+  });
 
   // ---------------------- VIDEO CALL JOIN ----------------------
   socket.on("room:join", ({ room, peerId }) => {
     socket.join(room);
     socketToUsername.set(socket.id, peerId);
+    
+    // Update user's public room status
+    const userStatus = userPrivateStatus.get(userId) || { inPrivate: false };
+    userStatus.publicRoom = room;
+    userPrivateStatus.set(userId, userStatus);
 
-    // Notify others
-    socket.to(room).emit("user:joined", { peerId });
+    // Join public video room initially
+    const publicVideoRoom = `${room}_video_public`;
+    socket.join(publicVideoRoom);
+    console.log(`📹 ${userId} joined public video room: ${publicVideoRoom}`);
 
-    // Send existing users to new peer
-    const users = Array.from(roomUsers.get(room) || []).filter(u => u !== peerId);
-    socket.emit("room:existing-users", { users });
+    // Notify existing public users about new video participant
+    socket.to(publicVideoRoom).emit("user:joined", { peerId });
+
+    // Get existing public users (not in private areas)
+    const publicUsers = Array.from(roomUsers.get(room) || [])
+      .filter(u => {
+        const uStatus = userPrivateStatus.get(u);
+        return u !== peerId && (!uStatus || !uStatus.inPrivate);
+      });
+    socket.emit("room:existing-users", { users: publicUsers });
 
     if (!roomUsers.has(room)) roomUsers.set(room, new Set());
     roomUsers.get(room)?.add(peerId);
@@ -113,13 +158,25 @@ io.on("connection", (socket) => {
   // ---------------------- ROOM LEAVE ----------------------
   socket.on("room:leave", ({ room, peerId }) => {
     socket.leave(room);
-
+    
+    // Also leave video rooms
+    const publicVideoRoom = `${room}_video_public`;
+    socket.leave(publicVideoRoom);
+    
+    // Leave any private video rooms
+    const userStatus = userPrivateStatus.get(userId);
+    if (userStatus?.inPrivate && userStatus.areaId) {
+      const privateVideoRoom = `${room}_video_private_${userStatus.areaId}`;
+      socket.leave(privateVideoRoom);
+    }
+    
     const users = roomUsers.get(room);
     if (users && peerId) {
       users.delete(peerId);
       const count = users.size;
       io.to(room).emit("room:userCount", { count });
       socket.to(room).emit("user:left", { peerId });
+      socket.to(publicVideoRoom).emit("user:left", { peerId });
     }
 
     if (peerId) {
@@ -133,13 +190,23 @@ io.on("connection", (socket) => {
     console.log(`🚪 User left room: ${peerId} from ${room}`);
   });
 
-  // ---------------------- PRIVATE ROOM JOIN ----------------------
+  // ---------------------- PRIVATE JOIN ----------------------
   socket.on("private:join", ({ room, playerId, publicRoom, areaId }) => {
     console.log(`🔐 ${playerId} joining private room: ${room} (area ${areaId})`);
 
     socket.leave(publicRoom);
     socket.join(room);
+    
+    // Update user's private status
+    const userStatus = userPrivateStatus.get(userId) || { inPrivate: false };
+    userStatus.inPrivate = true;
+    userStatus.areaId = areaId;
+    userStatus.publicRoom = publicRoom;
+    userPrivateStatus.set(userId, userStatus);
 
+    if (!privateRoomUsers.has(room)) privateRoomUsers.set(room, new Set());
+    privateRoomUsers.get(room)?.add(playerId);
+    
     if (!roomUsers.has(room)) roomUsers.set(room, new Set());
     roomUsers.get(room)?.add(playerId);
 
@@ -149,22 +216,62 @@ io.on("connection", (socket) => {
       type: "private" 
     });
 
-    const privateUsers = Array.from(roomUsers.get(room) || []).filter(u => u !== playerId);
-    socket.emit("private:existingUsers", { users: privateUsers, areaId });
+    const privateChatUsers = Array.from(roomUsers.get(room) || []).filter(u => u !== playerId);
+    socket.emit("private:existingUsers", { users: privateChatUsers, areaId });
 
     const privateCount = roomUsers.get(room)?.size || 1;
     io.to(room).emit("private:userCount", { count: privateCount, areaId });
 
+    // Handle video connection transition to private area
+    const publicVideoRoom = `${publicRoom}_video_public`;
+    const privateVideoRoom = `${publicRoom}_video_private_${areaId}`;
+    
+    // Leave public video room
+    socket.leave(publicVideoRoom);
+    socket.join(privateVideoRoom);
+    
+    // Send encryption key to user
+    const encryptionKey = getOrCreatePrivateKey(`${publicRoom}_private_${areaId}`);
+    socket.emit("private:encryption-key", { key: encryptionKey });
+    
+    console.log(`🔐 ${playerId} joined encrypted private video room: ${privateVideoRoom}`);
+    
+    // Notify other users in private area about new video participant
+    socket.to(privateVideoRoom).emit("private:video-user-joined", { 
+      peerId: playerId,
+      areaId: areaId,
+      encrypted: true 
+    });
+    
+    // Note: Existing private peer IDs will be sent when the user registers their private peer
+    
+    // FORCE all public users to remove this user's video stream
+    socket.to(publicVideoRoom).emit("user:left", { peerId: playerId });
+    socket.to(publicVideoRoom).emit("public:video-user-left", { 
+      peerId: playerId,
+      reason: "entered_private_area"
+    });
+    
+    console.log(`📵 Notified public users to remove ${playerId}'s video stream`);
+
     console.log(`🔒 Private room ${room} now has ${privateCount} users`);
   });
 
-  // ---------------------- PRIVATE ROOM LEAVE ----------------------
-  socket.on("private:leave", ({ room, playerId, publicRoom }) => {
+  // ---------------------- PRIVATE LEAVE ----------------------
+  socket.on("private:leave", ({ room, playerId, publicRoom, areaId }) => {
     console.log(`🚪 ${playerId} leaving private room: ${room}`);
 
     socket.leave(room);
+    
+    // Update user's private status
+    const userStatus = userPrivateStatus.get(userId) || { inPrivate: false };
+    userStatus.inPrivate = false;
+    userStatus.areaId = undefined;
+    userPrivateStatus.set(userId, userStatus);
 
     const privateUsers = roomUsers.get(room);
+    const privateRoomUserSet = privateRoomUsers.get(room);
+    
     if (privateUsers) {
       privateUsers.delete(playerId);
       const privateCount = privateUsers.size;
@@ -174,18 +281,57 @@ io.on("connection", (socket) => {
 
       if (privateCount === 0) {
         roomUsers.delete(room);
+        privateRoomUsers.delete(room);
+        // Clean up encryption key for empty private area
+        privateAreaKeys.delete(`${publicRoom}_private_${areaId}`);
         console.log(`🧹 Cleaned up empty private room: ${room}`);
       }
     }
-
-    // ✨ Notify this client to leave private chat mode
-    const clientSocketId = userToSocketMap.get(playerId);
-    if (clientSocketId) {
-      io.to(clientSocketId).emit("private:forceLeave");
+    
+    if (privateRoomUserSet) {
+      privateRoomUserSet.delete(playerId);
     }
 
     socket.join(publicRoom);
     console.log(`🔓 ${playerId} rejoined public room: ${publicRoom}`);
+
+    // Handle video connection transition back to public area
+    const privateVideoRoom = `${publicRoom}_video_private_${areaId}`;
+    const publicVideoRoom = `${publicRoom}_video_public`;
+    
+    // Leave private video room and join public
+    socket.leave(privateVideoRoom);
+    socket.join(publicVideoRoom);
+    
+    console.log(`📹 ${playerId} rejoined public video room: ${publicVideoRoom}`);
+    
+    // FORCE all private users to remove this user's video stream
+    socket.to(privateVideoRoom).emit("user:left", { peerId: playerId });
+    socket.to(privateVideoRoom).emit("private:video-user-left", { 
+      peerId: playerId,
+      reason: "left_private_area"
+    });
+    
+    console.log(`📵 Notified private users to remove ${playerId}'s video stream`);
+    
+    // Notify public area users that this user is now available for video
+    socket.to(publicVideoRoom).emit("user:joined", { peerId: playerId });
+    socket.to(publicVideoRoom).emit("public:video-user-joined", { 
+      peerId: playerId,
+      reason: "returned_from_private_area"
+    });
+    
+    console.log(`📹 Notified public users that ${playerId} is available for video`);
+    
+    // Get existing public users for this returning user
+    const publicUsers = Array.from(roomUsers.get(publicRoom) || [])
+      .filter(u => {
+        const uStatus = userPrivateStatus.get(u);
+        return u !== playerId && (!uStatus || !uStatus.inPrivate);
+      });
+    socket.emit("room:existing-users", { users: publicUsers });
+
+    socket.emit("private:leave:ack");
   });
 
   // ---------------------- PRIVATE MESSAGE ----------------------
@@ -198,6 +344,62 @@ io.on("connection", (socket) => {
   socket.on("message", ({ room, message, sender }) => {
     socket.to(room).emit("message", { sender, message });
   });
+  
+  // ---------------------- VIDEO AREA MANAGEMENT ----------------------
+  socket.on("video:enter-private-area", ({ areaId, peerId }) => {
+    console.log(`🔐 Video: ${peerId} entering private area ${areaId}`);
+    // This is handled by the private:join event above
+  });
+  
+  socket.on("video:leave-private-area", ({ peerId }) => {
+    console.log(`🔓 Video: ${peerId} leaving private area`);
+    // This is handled by the private:leave event above
+  });
+  
+  socket.on("video:request-public-users", ({ room }) => {
+    console.log(`📹 Video: Requesting public users for room ${room}`);
+    // Get users who are NOT in private areas
+    const publicUsers = Array.from(roomUsers.get(room) || [])
+      .filter(userId => {
+        const userStatus = userPrivateStatus.get(userId);
+        return !userStatus || !userStatus.inPrivate;
+      })
+      .filter(userId => userId !== socketToUsername.get(socket.id)); // Exclude the requester
+    
+    console.log(`📹 Sending ${publicUsers.length} public users:`, publicUsers);
+    socket.emit("video:public-users-response", { users: publicUsers });
+  });
+  
+  // Handle private peer ID registration
+  socket.on("video:register-private-peer", ({ privatePeerId, areaId }) => {
+    const username = socketToUsername.get(socket.id);
+    if (username) {
+      privatePeerIds.set(username, privatePeerId);
+      console.log(`🔐 Registered private peer ID for ${username}: ${privatePeerId}`);
+      
+      // Notify other users in the same private area
+      const privateRoom = `${userPrivateStatus.get(username)?.publicRoom}_private_${areaId}`;
+      const privateVideoRoom = `${userPrivateStatus.get(username)?.publicRoom}_video_private_${areaId}`;
+      
+      socket.to(privateVideoRoom).emit("private:video-user-joined", { 
+        peerId: privatePeerId,
+        areaId: areaId,
+        encrypted: true 
+      });
+      
+      // Send existing private peer IDs to the new user
+      const existingPrivatePeers = Array.from(privateRoomUsers.get(privateRoom) || [])
+        .filter(u => u !== username)
+        .map(u => privatePeerIds.get(u))
+        .filter(id => id); // Filter out undefined values
+      
+      socket.emit("private:video-existing-users", { 
+        users: existingPrivatePeers,
+        areaId: areaId,
+        encrypted: true 
+      });
+    }
+  });
 
   // ---------------------- DISCONNECT HANDLER ----------------------
   socket.on("disconnecting", () => {
@@ -207,15 +409,13 @@ io.on("connection", (socket) => {
     for (const room of socket.rooms) {
       if (room === socket.id) continue;
 
-      console.log(`🧹 Cleaning up user ${username} from room ${room}`);
-
       const users = roomUsers.get(room);
       if (users && username) {
         users.delete(username);
         const count = users.size;
         io.to(room).emit("room:userCount", { count });
         socket.to(room).emit("user:left", { peerId: username });
-        console.log(`📹 Removed ${username} from video/chat in room ${room}`);
+        console.log(`📹 Removed ${username} from chat in room ${room}`);
       }
 
       const players = roomPlayers.get(room);
@@ -238,6 +438,23 @@ io.on("connection", (socket) => {
       userToSocketMap.delete(username);
       playerPositions.delete(username);
       playerCharacters.delete(username);
+      
+      // Clean up private status and peer IDs
+      const userStatus = userPrivateStatus.get(username);
+      if (userStatus?.inPrivate && userStatus.areaId && userStatus.publicRoom) {
+        const privateRoom = `${userStatus.publicRoom}_private_${userStatus.areaId}`;
+        const privateUsers = privateRoomUsers.get(privateRoom);
+        if (privateUsers) {
+          privateUsers.delete(username);
+          if (privateUsers.size === 0) {
+            privateRoomUsers.delete(privateRoom);
+            // Clean up encryption key for empty private area
+            privateAreaKeys.delete(privateRoom);
+          }
+        }
+      }
+      userPrivateStatus.delete(username);
+      privatePeerIds.delete(username);
     }
   });
 });

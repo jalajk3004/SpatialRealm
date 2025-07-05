@@ -1,4 +1,4 @@
-// lib/tilesetLoader.ts
+
 export interface Tileset {
   firstgid: number;
   image: string;

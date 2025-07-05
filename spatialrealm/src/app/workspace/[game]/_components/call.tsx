@@ -7,7 +7,7 @@ import { BsMicMuteFill } from "react-icons/bs";
 import { FaMicrophone } from "react-icons/fa";
 
 export const Call = () => {
-  const { localStream, remoteStreams, isConnected, error, peerId } = useRoom();
+  const { localStream, remoteStreams, isConnected, error, peerId, isInPrivateArea, currentAreaId, encryptionKey } = useRoom();
 
   const [isMuted, setIsMuted] = useState(false);
   const [isVideoOff, setIsVideoOff] = useState(false);
@@ -148,8 +148,21 @@ export const Call = () => {
         </div>
       )}
 
-      <div className="absolute top-2 right-2 bg-black/50 text-white text-xs px-2 py-1 rounded">
-        {validStreams.length} participant{validStreams.length !== 1 ? "s" : ""}
+      <div className="absolute top-2 right-2 flex flex-col items-end gap-1">
+        <div className="bg-black/50 text-white text-xs px-2 py-1 rounded">
+          {validStreams.length} participant{validStreams.length !== 1 ? "s" : ""}
+        </div>
+        {isInPrivateArea && (
+          <div className="bg-purple-600 text-white text-xs px-2 py-1 rounded flex items-center gap-1">
+            <span>🔐</span>
+            <span>Private Area {currentAreaId}</span>
+          </div>
+        )}
+        {encryptionKey && (
+          <div className="bg-green-600 text-white text-xs px-1 py-0.5 rounded">
+            🛡️ Encrypted
+          </div>
+        )}
       </div>
     </div>
   );
