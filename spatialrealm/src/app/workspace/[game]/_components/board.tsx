@@ -17,14 +17,50 @@ export const Board = () => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const playerRef = useRef<any>(null);
   const othersRef = useRef<Record<string, any>>({});
-  const socketRef = useRef<Socket | null>(null);
+  const playerCharacters = useRef<Record<string, number>>({});
+  const currentPrivateArea = useRef<number | null>(null);
+  const privateAreas = useRef<Array<{id: number, x: number, y: number, width: number, height: number}>>([]);
 
   useEffect(() => {
     if (!canvasRef.current || !session.data?.user?.email) return;
 
     // Connect socket with authentication
     const socket = socketClient.connect(playerId);
-    socketRef.current = socket;
+
+    // Private area helper functions
+    const getPrivateAreaAtPosition = (x: number, y: number): number | null => {
+      for (const area of privateAreas.current) {
+        if (x >= area.x && x <= area.x + area.width && 
+            y >= area.y && y <= area.y + area.height) {
+          return area.id;
+        }
+      }
+      return null;
+    };
+    
+    const handlePrivateAreaChange = (newAreaId: number | null) => {
+      const previousArea = currentPrivateArea.current;
+      
+      if (previousArea !== newAreaId) {
+        console.log(`🔒 Private area change: ${previousArea} → ${newAreaId}`);
+        
+        // Leave previous private room if any
+        if (previousArea !== null) {
+          const privateRoomId = `${roomId}_private_${previousArea}`;
+          socket.emit("private:leave", { room: privateRoomId, playerId, publicRoom: roomId });
+          console.log(`🚪 Left private area ${previousArea}`);
+        }
+        
+        // Join new private room if any
+        if (newAreaId !== null) {
+          const privateRoomId = `${roomId}_private_${newAreaId}`;
+          socket.emit("private:join", { room: privateRoomId, playerId, publicRoom: roomId, areaId: newAreaId });
+          console.log(`🔐 Joined private area ${newAreaId}`);
+        }
+        
+        currentPrivateArea.current = newAreaId;
+      }
+    };
 
     // Create Kaboom instance with proper canvas sizing
     const k = createKaboom(canvasRef.current);
@@ -158,6 +194,37 @@ export const Board = () => {
       ]);
 
       const mapData = await fetch("/maps/map.json").then((res) => res.json());
+      
+      // Load private areas from map
+      const privateLayer = mapData.layers.find(
+        (layer: any) => layer.name === "Private"
+      );
+      
+      if (privateLayer && privateLayer.objects) {
+        privateAreas.current = privateLayer.objects.map((obj: any) => ({
+          id: obj.id,
+          x: obj.x,
+          y: obj.y,
+          width: obj.width,
+          height: obj.height
+        }));
+        
+        console.log(`🔐 Loaded ${privateAreas.current.length} private areas:`, privateAreas.current);
+        
+        // Add visual indicators for private areas (optional, semi-transparent blue)
+        for (const area of privateAreas.current) {
+          k.add([
+            k.rect(area.width, area.height),
+            k.pos(area.x, area.y),
+            k.color(0, 0, 1), // Blue for private areas
+            k.opacity(0.2),   // Very transparent
+            k.z(1),
+            "privateArea",
+          ]);
+        }
+      }
+      
+      // Load boundaries
       const boundaryLayer = mapData.layers.find(
         (layer: any) => layer.name === "BOUNDARY"
       );
@@ -230,28 +297,24 @@ export const Board = () => {
 
       // Movement with WASD Keys
       k.onKeyDown("a", () => {
-        console.log("A key pressed!");
         player.move(-player.speed, 0);
         player.play("idle-left");
         player.direction = "left";
       });
 
       k.onKeyDown("d", () => {
-        console.log("D key pressed!");
         player.move(player.speed, 0);
         player.play("idle-right");
         player.direction = "right";
       });
 
       k.onKeyDown("w", () => {
-        console.log("W key pressed!");
         player.move(0, -player.speed);
         player.play("idle-up");
         player.direction = "up";
       });
 
       k.onKeyDown("s", () => {
-        console.log("S key pressed!");
         player.move(0, player.speed);
         player.play("idle-down");
         player.direction = "down";
@@ -278,6 +341,10 @@ export const Board = () => {
         camY = Math.max(halfScreenHeight, Math.min(mapHeight - halfScreenHeight, camY));
         
         k.camPos(camX, camY);
+        
+        // Check for private area changes
+        const currentAreaId = getPrivateAreaAtPosition(player.pos.x, player.pos.y);
+        handlePrivateAreaChange(currentAreaId);
         
         // Send position updates
         const now = Date.now();

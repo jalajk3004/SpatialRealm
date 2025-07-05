@@ -47,11 +47,9 @@ io.on("connection", (socket) => {
         // Send existing users to new peer
         const users = Array.from(roomUsers.get(room) || []).filter(u => u !== peerId);
         socket.emit("room:existing-users", { users });
-        // Track peer
         if (!roomUsers.has(room))
             roomUsers.set(room, new Set());
         (_a = roomUsers.get(room)) === null || _a === void 0 ? void 0 : _a.add(peerId);
-        // Broadcast video call user count
         const count = ((_b = roomUsers.get(room)) === null || _b === void 0 ? void 0 : _b.size) || 1;
         io.to(room).emit("room:userCount", { count });
     });
@@ -75,22 +73,18 @@ io.on("connection", (socket) => {
         if (!roomPlayers.has(room))
             roomPlayers.set(room, new Set());
         (_a = roomPlayers.get(room)) === null || _a === void 0 ? void 0 : _a.add(playerId);
-        // Set default spawn position if not exists (spawn in walkable area)
         if (!playerPositions.has(playerId)) {
             playerPositions.set(playerId, { x: 150, y: 150 });
         }
-        // Store player character
         if (character !== undefined) {
             playerCharacters.set(playerId, character);
         }
-        // Send existing player positions and characters to new user
         const currentPlayers = Array.from(roomPlayers.get(room) || []).map((id) => ({
             id,
             position: playerPositions.get(id) || { x: 150, y: 150 },
             character: playerCharacters.get(id) || 0,
         }));
         socket.emit("room:playerStates", currentPlayers);
-        // Notify other players about new player joining
         socket.to(room).emit("player:joined", {
             id: playerId,
             position: playerPositions.get(playerId) || { x: 150, y: 150 },
@@ -107,7 +101,6 @@ io.on("connection", (socket) => {
     socket.on("room:leave", ({ room, peerId }) => {
         var _a;
         socket.leave(room);
-        // Remove from video/chat users
         const users = roomUsers.get(room);
         if (users && peerId) {
             users.delete(peerId);
@@ -115,7 +108,6 @@ io.on("connection", (socket) => {
             io.to(room).emit("room:userCount", { count });
             socket.to(room).emit("user:left", { peerId });
         }
-        // Also remove from board/game
         if (peerId) {
             (_a = roomPlayers.get(room)) === null || _a === void 0 ? void 0 : _a.delete(peerId);
             playerPositions.delete(peerId);
@@ -124,6 +116,54 @@ io.on("connection", (socket) => {
             console.log(`🎮 Player left game: ${peerId} from room ${room}`);
         }
         console.log(`🚪 User left room: ${peerId} from ${room}`);
+    });
+    // ---------------------- PRIVATE ROOM JOIN ----------------------
+    socket.on("private:join", ({ room, playerId, publicRoom, areaId }) => {
+        var _a, _b;
+        console.log(`🔐 ${playerId} joining private room: ${room} (area ${areaId})`);
+        socket.leave(publicRoom);
+        socket.join(room);
+        if (!roomUsers.has(room))
+            roomUsers.set(room, new Set());
+        (_a = roomUsers.get(room)) === null || _a === void 0 ? void 0 : _a.add(playerId);
+        socket.to(room).emit("private:userJoined", {
+            peerId: playerId,
+            areaId,
+            type: "private"
+        });
+        const privateUsers = Array.from(roomUsers.get(room) || []).filter(u => u !== playerId);
+        socket.emit("private:existingUsers", { users: privateUsers, areaId });
+        const privateCount = ((_b = roomUsers.get(room)) === null || _b === void 0 ? void 0 : _b.size) || 1;
+        io.to(room).emit("private:userCount", { count: privateCount, areaId });
+        console.log(`🔒 Private room ${room} now has ${privateCount} users`);
+    });
+    // ---------------------- PRIVATE ROOM LEAVE ----------------------
+    socket.on("private:leave", ({ room, playerId, publicRoom }) => {
+        console.log(`🚪 ${playerId} leaving private room: ${room}`);
+        socket.leave(room);
+        const privateUsers = roomUsers.get(room);
+        if (privateUsers) {
+            privateUsers.delete(playerId);
+            const privateCount = privateUsers.size;
+            socket.to(room).emit("private:userLeft", { peerId: playerId });
+            io.to(room).emit("private:userCount", { count: privateCount });
+            if (privateCount === 0) {
+                roomUsers.delete(room);
+                console.log(`🧹 Cleaned up empty private room: ${room}`);
+            }
+        }
+        // ✨ Notify this client to leave private chat mode
+        const clientSocketId = userToSocketMap.get(playerId);
+        if (clientSocketId) {
+            io.to(clientSocketId).emit("private:forceLeave");
+        }
+        socket.join(publicRoom);
+        console.log(`🔓 ${playerId} rejoined public room: ${publicRoom}`);
+    });
+    // ---------------------- PRIVATE MESSAGE ----------------------
+    socket.on("private:message", ({ room, message, sender }) => {
+        console.log(`💬 Private message in ${room} from ${sender}`);
+        socket.to(room).emit("private:message", { sender, message, type: "private" });
     });
     // ---------------------- CHAT MESSAGE ----------------------
     socket.on("message", ({ room, message, sender }) => {
@@ -137,7 +177,6 @@ io.on("connection", (socket) => {
             if (room === socket.id)
                 continue;
             console.log(`🧹 Cleaning up user ${username} from room ${room}`);
-            // Remove from chat/video
             const users = roomUsers.get(room);
             if (users && username) {
                 users.delete(username);
@@ -146,7 +185,6 @@ io.on("connection", (socket) => {
                 socket.to(room).emit("user:left", { peerId: username });
                 console.log(`📹 Removed ${username} from video/chat in room ${room}`);
             }
-            // Remove from board/game
             const players = roomPlayers.get(room);
             if (players && username) {
                 players.delete(username);
@@ -160,11 +198,9 @@ io.on("connection", (socket) => {
     socket.on("disconnect", () => {
         const username = socketToUsername.get(socket.id);
         console.log(`🛑 User fully disconnected: ${username} (${socket.id})`);
-        // Clean up all references
         socketToUsername.delete(socket.id);
         if (username) {
             userToSocketMap.delete(username);
-            // Final cleanup - remove from any remaining positions and characters
             playerPositions.delete(username);
             playerCharacters.delete(username);
         }

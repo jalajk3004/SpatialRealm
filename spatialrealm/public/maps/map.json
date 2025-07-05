@@ -352,6 +352,39 @@
         }, 
         {
          "draworder":"topdown",
+         "id":6,
+         "name":"Private",
+         "objects":[
+                {
+                 "height":88.0601503759398,
+                 "id":56,
+                 "name":"",
+                 "rotation":0,
+                 "type":"",
+                 "visible":true,
+                 "width":218.466165413534,
+                 "x":26.4661654135338,
+                 "y":27.4285714285714
+                }, 
+                {
+                 "height":89.984962406015,
+                 "id":57,
+                 "name":"",
+                 "rotation":0,
+                 "type":"",
+                 "visible":true,
+                 "width":206.917293233083,
+                 "x":247.81954887218,
+                 "y":26.4661654135338
+                }],
+         "opacity":1,
+         "type":"objectgroup",
+         "visible":true,
+         "x":0,
+         "y":0
+        }, 
+        {
+         "draworder":"topdown",
          "id":3,
          "name":"spawnpoint",
          "objects":[],
