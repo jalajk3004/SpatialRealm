@@ -335,14 +335,45 @@ io.on("connection", (socket) => {
   });
 
   // ---------------------- PRIVATE MESSAGE ----------------------
-  socket.on("private:message", ({ room, message, sender }) => {
-    console.log(`💬 Private message in ${room} from ${sender}`);
-    socket.to(room).emit("private:message", { sender, message, type: "private" });
+  socket.on("private:message", ({ room, message, sender, attachment, type }) => {
+    if (type === 'attachment' && attachment) {
+      console.log(`📎 Private attachment in ${room} from ${sender}: ${attachment.originalName}`);
+      socket.to(room).emit("private:message", { sender, attachment, type: "attachment" });
+    } else {
+      console.log(`💬 Private message in ${room} from ${sender}`);
+      socket.to(room).emit("private:message", { sender, message, type: "text" });
+    }
   });
 
   // ---------------------- CHAT MESSAGE ----------------------
-  socket.on("message", ({ room, message, sender }) => {
-    socket.to(room).emit("message", { sender, message });
+  socket.on("message", ({ room, message, sender, attachment, type }) => {
+    if (type === 'attachment' && attachment) {
+      console.log(`📎 Public attachment in ${room} from ${sender}: ${attachment.originalName}`);
+      socket.to(room).emit("message", { sender, attachment, type: "attachment" });
+    } else {
+      socket.to(room).emit("message", { sender, message, type: "text" });
+    }
+  });
+  
+  // ---------------------- SCREEN SHARING ----------------------
+  socket.on("screen-share:start", ({ room, peerId, isPrivate, areaId }) => {
+    console.log(`🖥️ ${peerId} started screen sharing in ${isPrivate ? 'private' : 'public'} area ${areaId || 'N/A'}`);
+    console.log(`🖥️ Target room: ${room}`);
+    
+    // Notify users in the specific room (already calculated in frontend)
+    socket.to(room).emit("screen-share:user-started", { 
+      peerId, 
+      isPrivate, 
+      areaId 
+    });
+  });
+  
+  socket.on("screen-share:stop", ({ room, peerId, isPrivate, areaId }) => {
+    console.log(`🖥️ ${peerId} stopped screen sharing`);
+    console.log(`🖥️ Target room: ${room}`);
+    
+    // Notify users in the specific room (already calculated in frontend)
+    socket.to(room).emit("screen-share:user-stopped", { peerId });
   });
   
   // ---------------------- VIDEO AREA MANAGEMENT ----------------------

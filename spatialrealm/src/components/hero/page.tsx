@@ -69,7 +69,7 @@ export default function MyWorkspaces() {
   }
 
   return (
-    <section className="flex flex-wrap gap-4 mt-12 ml-8 md:ml-28">
+    <section className="flex flex-wrap gap-4 mt-12 ml-8 ">
       {workspaces.map((ws) => (
         <div
           key={ws.id}

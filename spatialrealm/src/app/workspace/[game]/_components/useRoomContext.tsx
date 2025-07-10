@@ -24,6 +24,11 @@ interface RoomContextType {
   isInPrivateArea: boolean;
   currentAreaId: number | null;
   encryptionKey: string | null;
+  // Screen sharing
+  isScreenSharing: boolean;
+  startScreenShare: () => Promise<void>;
+  stopScreenShare: () => void;
+  screenShareStreams: Map<string, { stream: MediaStream; peerId: string; isOwn: boolean }>;
 }
 
 const RoomContext = createContext<RoomContextType | undefined>(undefined);
@@ -50,6 +55,12 @@ export const RoomProvider = ({ children }: { children: ReactNode }) => {
   const [currentAreaId, setCurrentAreaId] = useState<number | null>(null);
   const [encryptionKey, setEncryptionKey] = useState<string | null>(null);
   const [userAreaStatus, setUserAreaStatus] = useState<Record<string, { inPrivate: boolean; areaId?: number }>>({});
+  
+  // Screen sharing state
+  const [isScreenSharing, setIsScreenSharing] = useState(false);
+  const [screenShareStreams, setScreenShareStreams] = useState<Map<string, { stream: MediaStream; peerId: string; isOwn: boolean }>>(new Map());
+  const screenShareStreamRef = useRef<MediaStream | null>(null);
+  const screenSharePeersRef = useRef<{ [id: string]: MediaConnection }>({});
 
   const peersRef = useRef<{ [id: string]: MediaConnection }>({});
   const peerInstance = useRef<Peer | null>(null);
@@ -135,37 +146,65 @@ export const RoomProvider = ({ children }: { children: ReactNode }) => {
       peer.on("call", (call) => {
         console.log(`🌍 PUBLIC: Incoming call from ${call.peer}`);
         
+        // Check if this is a screen share call
+        const isScreenShare = call.metadata?.type === 'screen-share';
+        
         // REJECT if we're in private area
         if (isInPrivateArea) {
-          console.log(`🚫 PUBLIC: Rejecting call - currently in private area`);
+          console.log(`😫 PUBLIC: Rejecting call - currently in private area`);
           call.close();
           return;
         }
         
         if (!call.peer || call.peer === currentPeerIdRef.current || call.peer.includes('private')) {
-          console.log(`🚫 PUBLIC: Rejecting call - invalid peer`);
+          console.log(`😫 PUBLIC: Rejecting call - invalid peer`);
           call.close();
           return;
         }
 
         activePeerIds.current.add(call.peer);
-        call.answer(stream);
+        
+        // Answer with appropriate stream based on call type
+        if (isScreenShare) {
+          // For screen share calls, we don't need to send our stream back
+          call.answer();
+        } else {
+          call.answer(stream);
+        }
         
         call.on("stream", (remoteStream) => {
-          console.log(`🌊 PUBLIC: Stream from ${call.peer}`);
+          console.log(`🌊 PUBLIC: ${isScreenShare ? 'Screen share' : 'Video'} stream from ${call.peer}`);
           
           // Double check we're still in public area
           if (isInPrivateArea) {
-            console.log(`🚫 PUBLIC: Rejecting stream - now in private area`);
+            console.log(`😫 PUBLIC: Rejecting stream - now in private area`);
             call.close();
             return;
           }
           
-          peerStreamsRef.current[call.peer] = remoteStream;
-          setRemoteStreams(prev => {
-            const filtered = prev.filter(s => s.id !== remoteStream.id);
-            return [...filtered, remoteStream];
-          });
+          if (isScreenShare) {
+            // Handle screen share stream
+            console.log(`🖥️ PUBLIC: Receiving screen share from ${call.peer}`);
+            setScreenShareStreams(prev => {
+              const newMap = new Map(prev);
+              // Check if this is actually our own screen share (shouldn't happen but safety check)
+              const isOwn = call.peer === currentPeerIdRef.current;
+              newMap.set(call.peer, {
+                stream: remoteStream,
+                peerId: call.peer,
+                isOwn: isOwn
+              });
+              console.log(`🖥️ PUBLIC: Added screen share from ${call.peer}, isOwn: ${isOwn}`);
+              return newMap;
+            });
+          } else {
+            // Handle regular video stream
+            peerStreamsRef.current[call.peer] = remoteStream;
+            setRemoteStreams(prev => {
+              const filtered = prev.filter(s => s.id !== remoteStream.id);
+              return [...filtered, remoteStream];
+            });
+          }
         });
 
         call.on("close", () => {
@@ -218,37 +257,65 @@ export const RoomProvider = ({ children }: { children: ReactNode }) => {
       privatePeer.on("call", (call) => {
         console.log(`🔐 PRIVATE: Incoming call from ${call.peer}`);
         
+        // Check if this is a screen share call
+        const isScreenShare = call.metadata?.type === 'screen-share';
+        
         // REJECT if we're NOT in private area or wrong area
         if (!isInPrivateArea || currentAreaId !== areaId) {
-          console.log(`🚫 PRIVATE: Rejecting call - not in correct private area`);
+          console.log(`😫 PRIVATE: Rejecting call - not in correct private area`);
           call.close();
           return;
         }
         
         if (!call.peer || call.peer === currentPrivatePeerIdRef.current || !call.peer.includes('private')) {
-          console.log(`🚫 PRIVATE: Rejecting call - invalid private peer`);
+          console.log(`😫 PRIVATE: Rejecting call - invalid private peer`);
           call.close();
           return;
         }
 
         activePeerIds.current.add(call.peer);
-        call.answer(stream);
+        
+        // Answer with appropriate stream based on call type
+        if (isScreenShare) {
+          // For screen share calls, we don't need to send our stream back
+          call.answer();
+        } else {
+          call.answer(stream);
+        }
         
         call.on("stream", (remoteStream) => {
-          console.log(`🌊 PRIVATE: Stream from ${call.peer}`);
+          console.log(`🌊 PRIVATE: ${isScreenShare ? 'Screen share' : 'Video'} stream from ${call.peer}`);
           
           // Double check we're still in correct private area
           if (!isInPrivateArea || currentAreaId !== areaId) {
-            console.log(`🚫 PRIVATE: Rejecting stream - not in correct area`);
+            console.log(`😫 PRIVATE: Rejecting stream - not in correct area`);
             call.close();
             return;
           }
           
-          peerStreamsRef.current[call.peer] = remoteStream;
-          setRemoteStreams(prev => {
-            const filtered = prev.filter(s => s.id !== remoteStream.id);
-            return [...filtered, remoteStream];
-          });
+          if (isScreenShare) {
+            // Handle screen share stream
+            console.log(`🖥️ PRIVATE: Receiving screen share from ${call.peer}`);
+            setScreenShareStreams(prev => {
+              const newMap = new Map(prev);
+              // Check if this is actually our own screen share (shouldn't happen but safety check)
+              const isOwn = call.peer === currentPrivatePeerIdRef.current;
+              newMap.set(call.peer, {
+                stream: remoteStream,
+                peerId: call.peer,
+                isOwn: isOwn
+              });
+              console.log(`🖥️ PRIVATE: Added screen share from ${call.peer}, isOwn: ${isOwn}`);
+              return newMap;
+            });
+          } else {
+            // Handle regular video stream
+            peerStreamsRef.current[call.peer] = remoteStream;
+            setRemoteStreams(prev => {
+              const filtered = prev.filter(s => s.id !== remoteStream.id);
+              return [...filtered, remoteStream];
+            });
+          }
         });
 
         call.on("close", () => {
@@ -354,7 +421,7 @@ export const RoomProvider = ({ children }: { children: ReactNode }) => {
     };
 
     const handleUserLeft = ({ peerId }: { peerId: string }) => {
-      console.log(`🚪 User left:`, peerId);
+      console.log(`🚚 User left:`, peerId);
       
       // Remove user from area tracking
       setUserAreaStatus(prev => {
@@ -363,6 +430,16 @@ export const RoomProvider = ({ children }: { children: ReactNode }) => {
         return updated;
       });
       delete peerToUserMap.current[peerId];
+      
+      // Also remove any screen shares from this user
+      setScreenShareStreams(prev => {
+        const newMap = new Map(prev);
+        if (newMap.has(peerId)) {
+          console.log(`🧹 Removing screen share from disconnected user ${peerId}`);
+          newMap.delete(peerId);
+        }
+        return newMap;
+      });
       
       removePeerStream(peerId);
       activePeerIds.current.delete(peerId);
@@ -392,7 +469,7 @@ export const RoomProvider = ({ children }: { children: ReactNode }) => {
     };
     
     const handlePrivateVideoUserLeft = ({ peerId, reason }: { peerId: string; reason: string }) => {
-      console.log(`🚪 Private video user left: ${peerId} (${reason})`);
+      console.log(`🚚 Private video user left: ${peerId} (${reason})`);
       
       // Update user status based on reason
       if (reason === "left_private_area") {
@@ -410,6 +487,16 @@ export const RoomProvider = ({ children }: { children: ReactNode }) => {
         });
         delete peerToUserMap.current[peerId];
       }
+      
+      // Remove any screen shares from this user
+      setScreenShareStreams(prev => {
+        const newMap = new Map(prev);
+        if (newMap.has(peerId)) {
+          console.log(`🧹 Removing screen share from ${peerId} who left private area`);
+          newMap.delete(peerId);
+        }
+        return newMap;
+      });
       
       removePeerStream(peerId);
       activePeerIds.current.delete(peerId);
@@ -469,6 +556,16 @@ export const RoomProvider = ({ children }: { children: ReactNode }) => {
         delete peerToUserMap.current[peerId];
       }
       
+      // Remove any screen shares from this user
+      setScreenShareStreams(prev => {
+        const newMap = new Map(prev);
+        if (newMap.has(peerId)) {
+          console.log(`🧹 Removing screen share from ${peerId} who left public area`);
+          newMap.delete(peerId);
+        }
+        return newMap;
+      });
+      
       removePeerStream(peerId);
       activePeerIds.current.delete(peerId);
     };
@@ -476,6 +573,12 @@ export const RoomProvider = ({ children }: { children: ReactNode }) => {
     // Board events for private area state management
     const handlePrivateAreaEntered = async ({ areaId }: { areaId: number }) => {
       console.log(`🔐 ====== ENTERING PRIVATE AREA: ${areaId} ======`);
+      
+      // Stop any ongoing screen share when entering private area
+      if (isScreenSharing) {
+        console.log('🖥️ Stopping screen share before entering private area');
+        stopScreenShare();
+      }
       
       // IMMEDIATELY SET STATE
       setIsInPrivateArea(true);
@@ -498,10 +601,21 @@ export const RoomProvider = ({ children }: { children: ReactNode }) => {
         }
       });
       
-      // Clear all streams
+      // Clear all streams and screen shares from public area
       setRemoteStreams([]);
+      setScreenShareStreams(new Map());
       activePeerIds.current.clear();
       peerStreamsRef.current = {};
+      
+      // Clean up screen share peer connections
+      Object.values(screenSharePeersRef.current).forEach(call => {
+        try {
+          call.close();
+        } catch (e) {
+          console.log('Error closing screen share call:', e);
+        }
+      });
+      screenSharePeersRef.current = {};
       
       // DESTROY PUBLIC PEER INSTANCE
       if (peerInstance.current && !peerInstance.current.destroyed) {
@@ -522,11 +636,17 @@ export const RoomProvider = ({ children }: { children: ReactNode }) => {
     const handlePrivateAreaLeft = async () => {
       console.log('🔓 ====== LEAVING PRIVATE AREA ======');
       
-      // IMMEDIATELY SET STATE
+      // Stop any ongoing screen share when leaving private area
+      if (isScreenSharing) {
+        console.log('🖥️ Stopping screen share before leaving private area');
+        stopScreenShare();
+      }
+      
+      // IMMEDIATELY SET STATE - CLEAR ENCRYPTION FIRST
+      setEncryptionKey(null);
       setIsInPrivateArea(false);
       const oldAreaId = currentAreaId;
       setCurrentAreaId(null);
-      setEncryptionKey(null);
       
       // Update our own area status
       setUserAreaStatus(prev => ({
@@ -545,10 +665,21 @@ export const RoomProvider = ({ children }: { children: ReactNode }) => {
         }
       });
       
-      // Clear all streams
+      // Clear all streams and screen shares from private area
       setRemoteStreams([]);
+      setScreenShareStreams(new Map());
       activePeerIds.current.clear();
       peerStreamsRef.current = {};
+      
+      // Clean up screen share peer connections
+      Object.values(screenSharePeersRef.current).forEach(call => {
+        try {
+          call.close();
+        } catch (e) {
+          console.log('Error closing screen share call:', e);
+        }
+      });
+      screenSharePeersRef.current = {};
       
       // DESTROY PRIVATE PEER INSTANCE
       if (privatePeerInstance.current && !privatePeerInstance.current.destroyed) {
@@ -570,7 +701,38 @@ export const RoomProvider = ({ children }: { children: ReactNode }) => {
         }, 1000);
       }
       
-      console.log('💫 PUBLIC MODE ACTIVATED');
+      console.log('💫 PUBLIC MODE ACTIVATED - ENCRYPTION CLEARED');
+    };
+    
+    // Screen sharing event handlers
+    const handleScreenShareStarted = ({ peerId, isPrivate, areaId }: { peerId: string; isPrivate: boolean; areaId?: number }) => {
+      console.log(`🖥️ Screen share started by ${peerId} (private: ${isPrivate}, area: ${areaId})`);
+      
+      // Only show screen shares from users in the same area context
+      if (isPrivate && isInPrivateArea && areaId === currentAreaId) {
+        // Both in same private area
+        console.log(`🖥️ Showing private screen share from ${peerId}`);
+      } else if (!isPrivate && !isInPrivateArea) {
+        // Both in public area
+        console.log(`🖥️ Showing public screen share from ${peerId}`);
+      } else {
+        // Different area contexts - ignore
+        console.log(`🖥️ Ignoring screen share from ${peerId} - different area context`);
+        return;
+      }
+      
+      // The actual screen share stream will come through the peer connection
+    };
+    
+    const handleScreenShareStopped = ({ peerId }: { peerId: string }) => {
+      console.log(`🖥️ Screen share stopped by ${peerId}`);
+      
+      // Remove screen share from display
+      setScreenShareStreams(prev => {
+        const newMap = new Map(prev);
+        newMap.delete(peerId);
+        return newMap;
+      });
     };
 
     // Handle forced disconnects (page refresh/close)
@@ -612,6 +774,10 @@ export const RoomProvider = ({ children }: { children: ReactNode }) => {
       
       // Video area management events
       socket.on("video:public-users-response", handlePublicUsersResponse);
+      
+      // Screen sharing events
+      socket.on("screen-share:user-started", handleScreenShareStarted);
+      socket.on("screen-share:user-stopped", handleScreenShareStopped);
 
       socketHandlersSetup.current = true;
     }
@@ -654,6 +820,8 @@ export const RoomProvider = ({ children }: { children: ReactNode }) => {
       socket.off("board:private-area-entered", handlePrivateAreaEntered);
       socket.off("board:private-area-left", handlePrivateAreaLeft);
       socket.off("video:public-users-response", handlePublicUsersResponse);
+      socket.off("screen-share:user-started", handleScreenShareStarted);
+      socket.off("screen-share:user-stopped", handleScreenShareStopped);
       socketHandlersSetup.current = false;
 
       // Notify about our own disconnect
@@ -778,6 +946,131 @@ export const RoomProvider = ({ children }: { children: ReactNode }) => {
     peersRef.current[targetPeerId] = call;
   };
 
+  // Screen sharing functions
+  const startScreenShare = async (): Promise<void> => {
+    try {
+      console.log('🖥️ Starting screen share...');
+      
+      const screenStream = await navigator.mediaDevices.getDisplayMedia({
+        video: {
+          width: { ideal: 1920, max: 1920 },
+          height: { ideal: 1080, max: 1080 },
+          frameRate: { ideal: 30, max: 60 }
+        },
+        audio: true // Include system audio if available
+      });
+      
+      screenShareStreamRef.current = screenStream;
+      setIsScreenSharing(true);
+      
+      // Add our own screen share to the display
+      setScreenShareStreams(prev => {
+        const newMap = new Map(prev);
+        const currentPeerId = isInPrivateArea ? currentPrivatePeerIdRef.current : currentPeerIdRef.current;
+        console.log(`🖥️ Adding OWN screen share with peerId: ${currentPeerId}, isOwn: true`);
+        newMap.set(currentPeerId, {
+          stream: screenStream,
+          peerId: currentPeerId,
+          isOwn: true
+        });
+        return newMap;
+      });
+      
+      // Notify other users about screen share start
+      const currentRoom = isInPrivateArea && currentAreaId ? `${roomId}_private_${currentAreaId}` : roomId;
+      const screenShareData = {
+        room: currentRoom,
+        peerId: isInPrivateArea ? currentPrivatePeerIdRef.current : currentPeerIdRef.current,
+        isPrivate: isInPrivateArea,
+        areaId: currentAreaId
+      };
+      
+      socket.emit('screen-share:start', screenShareData);
+      
+      // Handle screen share ending (user clicks stop sharing)
+      screenStream.getVideoTracks()[0].onended = () => {
+        console.log('🖥️ Screen share ended by user');
+        stopScreenShare();
+      };
+      
+      // Make screen sharing calls to existing peers
+      const activePeer = isInPrivateArea ? privatePeerInstance.current : peerInstance.current;
+      if (activePeer) {
+        Object.keys(peersRef.current).forEach(targetPeerId => {
+          console.log(`🖥️ Sharing screen with ${targetPeerId}`);
+          const screenCall = activePeer.call(targetPeerId, screenStream, {
+            metadata: { type: 'screen-share' }
+          });
+          
+          if (screenCall) {
+            screenSharePeersRef.current[targetPeerId] = screenCall;
+            
+            screenCall.on('close', () => {
+              delete screenSharePeersRef.current[targetPeerId];
+            });
+            
+            screenCall.on('error', (err) => {
+              console.error(`Screen share call error with ${targetPeerId}:`, err);
+              delete screenSharePeersRef.current[targetPeerId];
+            });
+          }
+        });
+      }
+      
+      console.log('✅ Screen share started successfully');
+      
+    } catch (error) {
+      console.error('❌ Failed to start screen share:', error);
+      setError('Failed to start screen sharing. Please check permissions.');
+      throw error;
+    }
+  };
+  
+  const stopScreenShare = (): void => {
+    console.log('🖥️ Stopping screen share...');
+    
+    if (screenShareStreamRef.current) {
+      // Stop all tracks
+      screenShareStreamRef.current.getTracks().forEach(track => {
+        track.stop();
+      });
+      screenShareStreamRef.current = null;
+    }
+    
+    // Close all screen sharing peer connections
+    Object.values(screenSharePeersRef.current).forEach(call => {
+      try {
+        call.close();
+      } catch (e) {
+        console.log('Error closing screen share call:', e);
+      }
+    });
+    screenSharePeersRef.current = {};
+    
+    // Remove our screen share from display
+    setScreenShareStreams(prev => {
+      const newMap = new Map(prev);
+      const currentPeerId = isInPrivateArea ? currentPrivatePeerIdRef.current : currentPeerIdRef.current;
+      newMap.delete(currentPeerId);
+      return newMap;
+    });
+    
+    setIsScreenSharing(false);
+    
+    // Notify other users about screen share stop
+    const currentRoom = isInPrivateArea && currentAreaId ? `${roomId}_private_${currentAreaId}` : roomId;
+    const screenShareData = {
+      room: currentRoom,
+      peerId: isInPrivateArea ? currentPrivatePeerIdRef.current : currentPeerIdRef.current,
+      isPrivate: isInPrivateArea,
+      areaId: currentAreaId
+    };
+    
+    socket.emit('screen-share:stop', screenShareData);
+    
+    console.log('✅ Screen share stopped');
+  };
+
   const removePeerStream = (peerId: string) => {
     if (!peerId) return;
     
@@ -803,6 +1096,26 @@ export const RoomProvider = ({ children }: { children: ReactNode }) => {
       });
     }
     
+    // Also remove screen share stream if exists
+    setScreenShareStreams(prev => {
+      const newMap = new Map(prev);
+      if (newMap.has(peerId)) {
+        console.log(`🧹 Removing screen share from ${peerId}`);
+        newMap.delete(peerId);
+      }
+      return newMap;
+    });
+    
+    // Clean up screen share peer connections
+    if (screenSharePeersRef.current[peerId]) {
+      try {
+        screenSharePeersRef.current[peerId].close();
+      } catch (e) {
+        console.log('Error closing screen share connection:', e);
+      }
+      delete screenSharePeersRef.current[peerId];
+    }
+    
     activePeerIds.current.delete(peerId);
   };
   
@@ -812,8 +1125,10 @@ export const RoomProvider = ({ children }: { children: ReactNode }) => {
     
     // Force clear all streams when in wrong area context
     const currentStreams = remoteStreams.length;
-    if (currentStreams > 0) {
-      console.log(`🧹 Found ${currentStreams} streams during cleanup`);
+    const currentScreenShares = screenShareStreams.size;
+    
+    if (currentStreams > 0 || currentScreenShares > 0) {
+      console.log(`🧹 Found ${currentStreams} streams and ${currentScreenShares} screen shares during cleanup`);
       
       // Nuclear option: clear everything and let it rebuild
       Object.keys(peersRef.current).forEach(peerId => {
@@ -823,6 +1138,7 @@ export const RoomProvider = ({ children }: { children: ReactNode }) => {
       
       // Force empty state
       setRemoteStreams([]);
+      setScreenShareStreams(new Map());
     }
   };
 
@@ -837,6 +1153,11 @@ export const RoomProvider = ({ children }: { children: ReactNode }) => {
     isInPrivateArea,
     currentAreaId,
     encryptionKey,
+    // Screen sharing
+    isScreenSharing,
+    startScreenShare,
+    stopScreenShare,
+    screenShareStreams,
   };
 
   return (

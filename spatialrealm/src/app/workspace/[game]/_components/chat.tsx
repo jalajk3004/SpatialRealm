@@ -1,9 +1,11 @@
 "use client";
 
 import { socket } from "@/lib/socketclient";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useSession } from "next-auth/react";
 import { useParams } from "next/navigation";
+import { FileAttachment, FileInfo } from "./FileAttachment";
+import { ImAttachment } from "react-icons/im";
 
 export const Chat = () => {
   const { data: session } = useSession();
@@ -11,11 +13,20 @@ export const Chat = () => {
   const publicRoom = params?.game as string;
   const username = session?.user?.name || "Anonymous";
 
-  const [publicMessages, setPublicMessages] = useState<{ sender: string; message: string }[]>([]);
-  const [privateMessages, setPrivateMessages] = useState<{ sender: string; message: string }[]>([]);
+  interface ChatMessage {
+    sender: string;
+    message?: string;
+    attachment?: FileInfo;
+    type: 'text' | 'attachment';
+  }
+
+  const [publicMessages, setPublicMessages] = useState<ChatMessage[]>([]);
+  const [privateMessages, setPrivateMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState<string>("");
   const [privateRoomId, setPrivateRoomId] = useState<string | null>(null);
   const [userCount, setUserCount] = useState<number>(1);
+  const [isUploading, setIsUploading] = useState<boolean>(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const currentMessages = privateRoomId ? privateMessages : publicMessages;
   const setCurrentMessages = privateRoomId ? setPrivateMessages : setPublicMessages;
@@ -27,20 +38,20 @@ export const Chat = () => {
     // Join the public chat room
     socket.emit("chat:join", { room: publicRoom, username });
 
-    const handlePublicMessage = (data: { sender: string; message: string }) => {
+    const handlePublicMessage = (data: { sender: string; message?: string; attachment?: FileInfo; type: 'text' | 'attachment' }) => {
       if (!privateRoomId) {
         setPublicMessages((prev) => [...prev, data]);
       }
     };
 
-    const handlePrivateMessage = (data: { sender: string; message: string }) => {
+    const handlePrivateMessage = (data: { sender: string; message?: string; attachment?: FileInfo; type: 'text' | 'attachment' }) => {
       if (privateRoomId) {
         setPrivateMessages((prev) => [...prev, data]);
       }
     };
 
     const handleUserJoined = ({ username }: { username: string }) => {
-      const joinMessage = { sender: "system", message: `${username} joined the room.` };
+      const joinMessage = { sender: "system", message: `${username} joined the room.`, type: 'text' as const };
       if (!privateRoomId) {
         setPublicMessages((prev) => [...prev, joinMessage]);
       }
@@ -85,17 +96,69 @@ export const Chat = () => {
       room: currentRoom,
       message: input.trim(),
       sender: username,
+      type: 'text' as const,
     };
 
     if (privateRoomId) {
       socket.emit("private:message", messageData);
-      setPrivateMessages((prev) => [...prev, { sender: username, message: input.trim() }]);
+      setPrivateMessages((prev) => [...prev, { sender: username, message: input.trim(), type: 'text' }]);
     } else {
       socket.emit("message", messageData);
-      setPublicMessages((prev) => [...prev, { sender: username, message: input.trim() }]);
+      setPublicMessages((prev) => [...prev, { sender: username, message: input.trim(), type: 'text' }]);
     }
 
     setInput("");
+  };
+
+  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setIsUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('roomType', privateRoomId ? 'private' : 'public');
+      formData.append('roomId', currentRoom);
+
+      const response = await fetch('/api/upload', {
+        method: 'POST',
+        body: formData,
+      });
+
+      const result = await response.json();
+
+      if (result.success && result.file) {
+        const attachmentData = {
+          room: currentRoom,
+          sender: username,
+          attachment: result.file,
+          type: 'attachment' as const,
+        };
+
+        if (privateRoomId) {
+          socket.emit("private:message", attachmentData);
+          setPrivateMessages((prev) => [...prev, { sender: username, attachment: result.file, type: 'attachment' }]);
+        } else {
+          socket.emit("message", attachmentData);
+          setPublicMessages((prev) => [...prev, { sender: username, attachment: result.file, type: 'attachment' }]);
+        }
+      } else {
+        alert('Failed to upload file: ' + (result.error || 'Unknown error'));
+      }
+    } catch (error) {
+      console.error('Error uploading file:', error);
+      alert('Failed to upload file. Please try again.');
+    } finally {
+      setIsUploading(false);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    }
+  };
+
+  const handleAttachmentClick = () => {
+    fileInputRef.current?.click();
   };
 
   return (
@@ -115,38 +178,72 @@ export const Chat = () => {
             {msg.sender !== "system" && (
               <span className="text-xs text-gray-500 mb-1">{msg.sender}</span>
             )}
-            <div
-              className={`px-3 py-2 rounded-lg max-w-[80%] ${
-                msg.sender === username
-                  ? "bg-blue-500 text-white"
-                  : msg.sender === "system"
-                  ? "bg-yellow-100 text-gray-800"
-                  : "bg-gray-200 text-gray-900"
-              }`}
-            >
-              {msg.message}
-            </div>
+            
+            {msg.type === 'attachment' && msg.attachment ? (
+              <FileAttachment 
+                file={msg.attachment} 
+                sender={msg.sender} 
+                isOwn={msg.sender === username} 
+              />
+            ) : (
+              <div
+                className={`px-3 py-2 rounded-lg max-w-[80%] ${
+                  msg.sender === username
+                    ? "bg-blue-500 text-white"
+                    : msg.sender === "system"
+                    ? "bg-yellow-100 text-gray-800"
+                    : "bg-gray-200 text-gray-900"
+                }`}
+              >
+                {msg.message}
+              </div>
+            )}
           </div>
         ))}
       </div>
 
       {/* Input */}
-      <div className="p-3 border-t bg-white text-black flex gap-2">
+      <div className="p-3 border-t bg-white text-black">
+        <div className="flex gap-2 mb-2">
+          <input
+            type="text"
+            placeholder="Send a message..."
+            className="flex-1 px-3 py-2 text-sm border rounded-md focus:outline-none"
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && handleSendMessage()}
+          />
+          <button
+            className="px-3 py-2 text-sm text-gray-600 bg-gray-100 rounded-md hover:bg-gray-200 disabled:opacity-60 transition-colors"
+            onClick={handleAttachmentClick}
+            disabled={isUploading}
+            title="Attach file"
+          >
+            {isUploading ? "📤" : <ImAttachment />}
+          </button>
+          <button
+            className="px-1 py-2 text-sm text-white bg-blue-500 rounded-md disabled:opacity-60 hover:bg-blue-600 transition-colors"
+            onClick={handleSendMessage}
+            disabled={!input.trim()}
+          >
+            Send
+          </button>
+        </div>
+        
+        {isUploading && (
+          <div className="text-xs text-gray-500 flex items-center gap-1">
+            <span className="animate-spin">⏳</span>
+            Uploading file...
+          </div>
+        )}
+        
         <input
-          type="text"
-          placeholder="Send a message..."
-          className="flex-1 px-3 py-2 text-sm border rounded-md focus:outline-none"
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && handleSendMessage()}
+          ref={fileInputRef}
+          type="file"
+          className="hidden"
+          onChange={handleFileUpload}
+          accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.jpg,.jpeg,.png,.gif,.webp,.svg,.mp4,.webm,.ogg,.avi,.mov,.wmv,.mp3,.wav,.ogg,.zip,.rar,.7z"
         />
-        <button
-          className="px-4 py-2 text-sm text-white bg-blue-500 rounded-md disabled:opacity-60"
-          onClick={handleSendMessage}
-          disabled={!input.trim()}
-        >
-          Send
-        </button>
       </div>
     </div>
   );
