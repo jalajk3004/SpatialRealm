@@ -23,7 +23,7 @@ class SocketClient {
     }
 
     // Create new socket with auth
-    this.socket = io("http://localhost:9000", {
+    this.socket = io(`${process.env.BACKEND_URL}`||"http://localhost:9000", {
       transports: ["websocket"],
       auth: {
         userId: userId
@@ -67,6 +67,7 @@ const socketClient = new SocketClient();
 // Create a socket object that mimics the original interface
 export const socket = {
   connect: (userId: string) => socketClient.connect(userId),
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   emit: (...args: [event: string, ...args: any[]]) => {
     const currentSocket = socketClient.getSocket();
     if (currentSocket) {
@@ -74,6 +75,7 @@ export const socket = {
     }
     console.warn('Socket not connected');
   },
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   on: (...args: [event: string, listener: (...args: any[]) => void]) => {
     const currentSocket = socketClient.getSocket();
     if (currentSocket) {
@@ -81,6 +83,7 @@ export const socket = {
     }
     console.warn('Socket not connected');
   },
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   off: (...args: any[]) => {
     const currentSocket = socketClient.getSocket();
     if (currentSocket) {
