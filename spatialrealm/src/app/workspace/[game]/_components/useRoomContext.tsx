@@ -116,8 +116,8 @@ export const RoomProvider = ({ children }: { children: ReactNode }) => {
       console.log('🌍 Initializing PUBLIC peer instance');
       
       const peer = new Peer({
-        host: process.env.NEXT_PUBLIC_PEER_HOST || "localhost",
-        port: parseInt(process.env.NEXT_PUBLIC_PEER_PORT || "9001"),
+        host: process.env.NEXT_PUBLIC_PEER_HOST,
+        port: parseInt(process.env.NEXT_PUBLIC_PEER_PORT || "443"),
         path: "/peerjs",
         secure: process.env.NODE_ENV === "production",
         debug: 0,
@@ -232,8 +232,8 @@ export const RoomProvider = ({ children }: { children: ReactNode }) => {
       console.log(`🔐 Initializing PRIVATE peer instance for area ${areaId}`);
       
       const privatePeer = new Peer(`private_${userId}_${areaId}_${Date.now()}`, {
-        host: process.env.NEXT_PUBLIC_PEER_HOST || "localhost",
-        port: parseInt(process.env.NEXT_PUBLIC_PEER_PORT || "9001"),
+        host: process.env.NEXT_PUBLIC_PEER_HOST,
+        port: parseInt(process.env.NEXT_PUBLIC_PEER_PORT || "443"),
         path: "/peerjs",
         secure: process.env.NODE_ENV === "production",
         debug: 0,
