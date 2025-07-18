@@ -1,17 +1,36 @@
 class PeerService {
-  private peer: RTCPeerConnection;
+  private peer: RTCPeerConnection | null = null;
 
   constructor() {
-    this.peer = new RTCPeerConnection({
-      iceServers: [
-        {
-          urls: [
-            "stun:stun.l.google.com:19302",
-            "stun:global.stun.twilio.com:3478",
-          ],
-        },
-      ],
-    });
+    // Only create RTCPeerConnection on the client side
+    if (typeof window !== 'undefined' && window.RTCPeerConnection) {
+      this.peer = new RTCPeerConnection({
+        iceServers: [
+          {
+            urls: [
+              "stun:stun.l.google.com:19302",
+              "stun:global.stun.twilio.com:3478",
+            ],
+          },
+        ],
+      });
+    }
+  }
+
+  private ensurePeer(): RTCPeerConnection | null {
+    if (!this.peer && typeof window !== 'undefined' && window.RTCPeerConnection) {
+      this.peer = new RTCPeerConnection({
+        iceServers: [
+          {
+            urls: [
+              "stun:stun.l.google.com:19302",
+              "stun:global.stun.twilio.com:3478",
+            ],
+          },
+        ],
+      });
+    }
+    return this.peer;
   }
 
   async getAnswer(offer: RTCSessionDescriptionInit): Promise<RTCSessionDescriptionInit | undefined> {
