@@ -89,8 +89,9 @@ export const RoomProvider = ({ children }: { children: ReactNode }) => {
         setLocalStream(stream);
         localStreamRef.current = stream;
 
-        // Create peer instance
-        const peer = new Peer({
+        // Create peer instance with a clean ID
+        const cleanUserId = userId.replace(/[^a-zA-Z0-9]/g, '') + '_' + Date.now();
+        const peer = new Peer(cleanUserId, {
           host: process.env.NEXT_PUBLIC_PEER_HOST,
           port: parseInt(process.env.NEXT_PUBLIC_PEER_PORT || "443"),
           path: "/peerjs",
@@ -109,7 +110,10 @@ export const RoomProvider = ({ children }: { children: ReactNode }) => {
 
         peer.on("error", (err) => {
           console.error("PeerJS error:", err);
-          setError(err.message);
+          // Only show critical errors to user, not connection errors
+          if (err.type === 'server-error' || err.type === 'socket-error') {
+            setError(err.message);
+          }
         });
 
         peer.on("disconnected", () => {
@@ -312,6 +316,12 @@ export const RoomProvider = ({ children }: { children: ReactNode }) => {
 
     if (peersRef.current[targetPeerId]) {
       console.log(`🚫 Call blocked - already connected`);
+      return;
+    }
+
+    // Validate peer ID format
+    if (!targetPeerId || typeof targetPeerId !== 'string' || targetPeerId.trim() === '') {
+      console.log(`🚫 Call blocked - invalid peer ID: ${targetPeerId}`);
       return;
     }
 
