@@ -12,7 +12,8 @@ const io = new Server(server, {
 });
 
 // Trackers
-const roomUsers = new Map<string, Set<string>>();         // chat/video
+const roomUsers = new Map<string, Set<string>>();         // chat users
+const roomVideoUsers = new Map<string, Set<string>>();    // video peer IDs
 const roomPlayers = new Map<string, Set<string>>();       // board movement
 const playerPositions = new Map<string, { x: number; y: number }>();
 const playerCharacters = new Map<string, number>();
@@ -80,6 +81,7 @@ io.on("connection", (socket) => {
 
   // ---------------------- VIDEO CALL JOIN ----------------------
   socket.on("room:join", ({ room, peerId }) => {
+    console.log(`📹 Video join request: ${peerId} joining room ${room}`);
     socket.join(room);
     socketToUsername.set(socket.id, peerId);
     
@@ -96,18 +98,20 @@ io.on("connection", (socket) => {
     // Notify existing public users about new video participant
     socket.to(publicVideoRoom).emit("user:joined", { peerId });
 
-    // Get existing public users (not in private areas)
-    const publicUsers = Array.from(roomUsers.get(room) || [])
+    // Get existing public video users (not in private areas)
+    const publicVideoUsers = Array.from(roomVideoUsers.get(room) || [])
       .filter(u => {
         const uStatus = userPrivateStatus.get(u);
         return u !== peerId && (!uStatus || !uStatus.inPrivate);
       });
-    socket.emit("room:existing-users", { users: publicUsers });
+    console.log(`📹 Sending existing video users to ${peerId}:`, publicVideoUsers);
+    socket.emit("room:existing-users", { users: publicVideoUsers });
 
-    if (!roomUsers.has(room)) roomUsers.set(room, new Set());
-    roomUsers.get(room)?.add(peerId);
+    if (!roomVideoUsers.has(room)) roomVideoUsers.set(room, new Set());
+    roomVideoUsers.get(room)?.add(peerId);
 
-    const count = roomUsers.get(room)?.size || 1;
+    const count = roomVideoUsers.get(room)?.size || 1;
+    console.log(`📹 Video room ${room} now has ${count} users`);
     io.to(room).emit("room:userCount", { count });
   });
 
@@ -178,10 +182,11 @@ io.on("connection", (socket) => {
       socket.leave(privateVideoRoom);
     }
     
-    const users = roomUsers.get(room);
-    if (users && peerId) {
-      users.delete(peerId);
-      const count = users.size;
+    const videoUsers = roomVideoUsers.get(room);
+    if (videoUsers && peerId) {
+      videoUsers.delete(peerId);
+      const count = videoUsers.size;
+      console.log(`📹 Video user ${peerId} left room ${room}, ${count} users remaining`);
       io.to(room).emit("room:userCount", { count });
       socket.to(room).emit("user:left", { peerId });
       socket.to(publicVideoRoom).emit("user:left", { peerId });

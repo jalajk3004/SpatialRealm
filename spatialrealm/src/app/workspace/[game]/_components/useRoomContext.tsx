@@ -91,6 +91,7 @@ export const RoomProvider = ({ children }: { children: ReactNode }) => {
 
         // Create peer instance with a clean ID
         const cleanUserId = userId.replace(/[^a-zA-Z0-9]/g, '') + '_' + Date.now();
+        console.log('🔧 Creating peer with clean ID:', cleanUserId);
         const peer = new Peer(cleanUserId, {
           host: process.env.NEXT_PUBLIC_PEER_HOST,
           port: parseInt(process.env.NEXT_PUBLIC_PEER_PORT || "443"),
@@ -181,6 +182,7 @@ export const RoomProvider = ({ children }: { children: ReactNode }) => {
           console.log(`🌍 Peer opened with ID: ${id}`);
           currentPeerIdRef.current = id;
           setIsConnected(true);
+          console.log('🔗 Emitting room:join with peerId:', id);
           socket.emit("room:join", { room: roomId, peerId: id });
         });
         
@@ -194,10 +196,12 @@ export const RoomProvider = ({ children }: { children: ReactNode }) => {
 
     const handleExistingUsers = ({ users }: { users: string[] }) => {
       console.log(`📹 Received existing users:`, users);
+      console.log('🔍 Current peer ID:', currentPeerIdRef.current);
       
       // Connect to existing users
       users.forEach((peerId) => {
         if (peerId && peerId !== currentPeerIdRef.current) {
+          console.log(`🔗 Attempting to connect to:`, peerId);
           activePeerIds.current.add(peerId);
           setTimeout(() => makeCall(peerId), 500);
         }
@@ -325,6 +329,10 @@ export const RoomProvider = ({ children }: { children: ReactNode }) => {
       return;
     }
 
+    console.log(`🔗 About to call peer:`, targetPeerId);
+    console.log(`🔗 Using peer instance:`, peerInstance.current?.id);
+    console.log(`🔗 Local stream tracks:`, localStreamRef.current?.getTracks().length);
+    
     const call = peerInstance.current.call(targetPeerId, localStreamRef.current);
     if (!call) {
       console.log(`🚫 Call failed - no call object`);
