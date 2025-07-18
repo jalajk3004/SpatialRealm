@@ -12,6 +12,7 @@ import Peer, { MediaConnection } from "peerjs";
 import { socket } from "@/lib/socketclient";
 import { useParams } from "next/navigation";
 import { useSession } from "next-auth/react";
+import peerService from "@/lib/peer";
 
 interface RoomContextType {
   socket: typeof socket;
@@ -29,6 +30,14 @@ interface RoomContextType {
   startScreenShare: () => Promise<void>;
   stopScreenShare: () => void;
   screenShareStreams: Map<string, { stream: MediaStream; peerId: string; isOwn: boolean }>;
+  // Video call functionality
+  isInCall: boolean;
+  callState: 'idle' | 'calling' | 'receiving' | 'connected';
+  currentCallPeer: string | null;
+  callUser: (targetSocketId: string) => Promise<void>;
+  acceptCall: () => Promise<void>;
+  rejectCall: () => void;
+  endCall: () => void;
 }
 
 const RoomContext = createContext<RoomContextType | undefined>(undefined);
@@ -61,6 +70,13 @@ export const RoomProvider = ({ children }: { children: ReactNode }) => {
   const [screenShareStreams, setScreenShareStreams] = useState<Map<string, { stream: MediaStream; peerId: string; isOwn: boolean }>>(new Map());
   const screenShareStreamRef = useRef<MediaStream | null>(null);
   const screenSharePeersRef = useRef<{ [id: string]: MediaConnection }>({});
+  
+  // Video call state
+  const [isInCall, setIsInCall] = useState(false);
+  const [callState, setCallState] = useState<'idle' | 'calling' | 'receiving' | 'connected'>('idle');
+  const [currentCallPeer, setCurrentCallPeer] = useState<string | null>(null);
+  const [incomingCall, setIncomingCall] = useState<{ from: string; offer: RTCSessionDescriptionInit } | null>(null);
+  const remoteStreamRef = useRef<MediaStream | null>(null);
 
   const peersRef = useRef<{ [id: string]: MediaConnection }>({});
   const peerInstance = useRef<Peer | null>(null);
@@ -758,6 +774,33 @@ export const RoomProvider = ({ children }: { children: ReactNode }) => {
         activePeerIds.current.delete(peerId);
       });
       
+      // Video call event handlers
+      socket.on('incomming:call', ({ from, offer }: { from: string; offer: RTCSessionDescriptionInit }) => {
+        console.log(`📞 Incoming call from ${from}`);
+        setIncomingCall({ from, offer });
+        setCallState('receiving');
+      });
+      
+      socket.on('call:accepted', async ({ from, ans }: { from: string; ans: RTCSessionDescriptionInit }) => {
+        console.log(`📞 Call accepted by ${from}`);
+        setCallState('connected');
+        setIsInCall(true);
+        await peerService.setLocalDescription(ans);
+      });
+      
+      socket.on('peer:nego:needed', async ({ from, offer }: { from: string; offer: RTCSessionDescriptionInit }) => {
+        console.log(`🔄 Peer negotiation needed from ${from}`);
+        const answer = await peerService.getAnswer(offer);
+        if (answer) {
+          socket.emit('peer:nego:done', { to: from, ans: answer });
+        }
+      });
+      
+      socket.on('peer:nego:final', async ({ from, ans }: { from: string; ans: RTCSessionDescriptionInit }) => {
+        console.log(`🔄 Peer negotiation final from ${from}`);
+        await peerService.setLocalDescription(ans);
+      });
+      
       // Private area video events
       socket.on("private:encryption-key", handlePrivateEncryptionKey);
       socket.on("private:video-user-joined", handlePrivateVideoUserJoined);
@@ -811,6 +854,12 @@ export const RoomProvider = ({ children }: { children: ReactNode }) => {
       socket.off("user:joined", handleUserJoined);
       socket.off("user:left", handleUserLeft);
       socket.off("user:force-disconnect");
+      
+      // Clean up video call handlers
+      socket.off('incomming:call');
+      socket.off('call:accepted');
+      socket.off('peer:nego:needed');
+      socket.off('peer:nego:final');
       socket.off("private:encryption-key", handlePrivateEncryptionKey);
       socket.off("private:video-user-joined", handlePrivateVideoUserJoined);
       socket.off("private:video-user-left", handlePrivateVideoUserLeft);
@@ -944,6 +993,67 @@ export const RoomProvider = ({ children }: { children: ReactNode }) => {
     });
 
     peersRef.current[targetPeerId] = call;
+  };
+
+  // Video call functions
+  const callUser = async (targetSocketId: string): Promise<void> => {
+    try {
+      console.log(`📞 Initiating call to ${targetSocketId}`);
+      setCallState('calling');
+      setCurrentCallPeer(targetSocketId);
+      
+      const offer = await peerService.getOffer();
+      if (offer) {
+        socket.emit('user:call', { to: targetSocketId, offer });
+      }
+    } catch (error) {
+      console.error('❌ Error initiating call:', error);
+      setError('Failed to initiate call');
+      setCallState('idle');
+      setCurrentCallPeer(null);
+    }
+  };
+  
+  const acceptCall = async (): Promise<void> => {
+    try {
+      if (!incomingCall) return;
+      
+      console.log(`📞 Accepting call from ${incomingCall.from}`);
+      setCallState('connected');
+      setCurrentCallPeer(incomingCall.from);
+      setIsInCall(true);
+      
+      const answer = await peerService.getAnswer(incomingCall.offer);
+      if (answer) {
+        socket.emit('call:accepted', { to: incomingCall.from, ans: answer });
+      }
+      
+      setIncomingCall(null);
+    } catch (error) {
+      console.error('❌ Error accepting call:', error);
+      setError('Failed to accept call');
+      rejectCall();
+    }
+  };
+  
+  const rejectCall = (): void => {
+    console.log('📞 Rejecting call');
+    setIncomingCall(null);
+    setCallState('idle');
+    setCurrentCallPeer(null);
+  };
+  
+  const endCall = (): void => {
+    console.log('📞 Ending call');
+    setIsInCall(false);
+    setCallState('idle');
+    setCurrentCallPeer(null);
+    setIncomingCall(null);
+    
+    if (remoteStreamRef.current) {
+      remoteStreamRef.current.getTracks().forEach(track => track.stop());
+      remoteStreamRef.current = null;
+    }
   };
 
   // Screen sharing functions
@@ -1158,6 +1268,14 @@ export const RoomProvider = ({ children }: { children: ReactNode }) => {
     startScreenShare,
     stopScreenShare,
     screenShareStreams,
+    // Video call functionality
+    isInCall,
+    callState,
+    currentCallPeer,
+    callUser,
+    acceptCall,
+    rejectCall,
+    endCall,
   };
 
   return (
