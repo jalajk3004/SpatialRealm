@@ -1,58 +1,90 @@
+// Simple peer connection manager - only works on client side
 class PeerService {
   private peer: RTCPeerConnection | null = null;
 
   constructor() {
-    // Only create RTCPeerConnection on the client side
-    if (typeof window !== 'undefined' && window.RTCPeerConnection) {
-      this.peer = new RTCPeerConnection({
-        iceServers: [
-          {
-            urls: [
-              "stun:stun.l.google.com:19302",
-              "stun:global.stun.twilio.com:3478",
-            ],
-          },
-        ],
-      });
-    }
+    // Don't initialize anything in constructor to avoid SSR issues
   }
 
-  private ensurePeer(): RTCPeerConnection | null {
-    if (!this.peer && typeof window !== 'undefined' && window.RTCPeerConnection) {
-      this.peer = new RTCPeerConnection({
-        iceServers: [
-          {
-            urls: [
-              "stun:stun.l.google.com:19302",
-              "stun:global.stun.twilio.com:3478",
-            ],
-          },
-        ],
-      });
+  private createPeerConnection(): RTCPeerConnection | null {
+    // Only create RTCPeerConnection on the client side
+    if (typeof window === 'undefined' || !window.RTCPeerConnection) {
+      return null;
+    }
+
+    const config = {
+      iceServers: [
+        {
+          urls: 'stun:stun.l.google.com:19302'
+        }
+      ]
+    };
+
+    return new RTCPeerConnection(config);
+  }
+
+  getInstance(): RTCPeerConnection | null {
+    if (!this.peer) {
+      this.peer = this.createPeerConnection();
     }
     return this.peer;
   }
 
-  async getAnswer(offer: RTCSessionDescriptionInit): Promise<RTCSessionDescriptionInit | undefined> {
-    if (this.peer) {
-      await this.peer.setRemoteDescription(new RTCSessionDescription(offer));
-      const ans = await this.peer.createAnswer();
-      await this.peer.setLocalDescription(ans);
-      return ans;
-    }
-  }
+  async createOffer(): Promise<RTCSessionDescriptionInit | null> {
+    const pc = this.getInstance();
+    if (!pc) return null;
 
-  async setLocalDescription(ans: RTCSessionDescriptionInit): Promise<void> {
-    if (this.peer) {
-      await this.peer.setRemoteDescription(new RTCSessionDescription(ans));
-    }
-  }
-
-  async getOffer(): Promise<RTCSessionDescriptionInit | undefined> {
-    if (this.peer) {
-      const offer = await this.peer.createOffer();
-      await this.peer.setLocalDescription(offer);
+    try {
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
       return offer;
+    } catch (error) {
+      console.error('Error creating offer:', error);
+      return null;
+    }
+  }
+
+  async createAnswer(offer: RTCSessionDescriptionInit): Promise<RTCSessionDescriptionInit | null> {
+    const pc = this.getInstance();
+    if (!pc) return null;
+
+    try {
+      await pc.setRemoteDescription(new RTCSessionDescription(offer));
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+      return answer;
+    } catch (error) {
+      console.error('Error creating answer:', error);
+      return null;
+    }
+  }
+
+  async setRemoteDescription(description: RTCSessionDescriptionInit): Promise<void> {
+    const pc = this.getInstance();
+    if (!pc) return;
+
+    try {
+      await pc.setRemoteDescription(new RTCSessionDescription(description));
+    } catch (error) {
+      console.error('Error setting remote description:', error);
+    }
+  }
+
+  async addIceCandidate(candidate: RTCIceCandidateInit): Promise<void> {
+    const pc = this.getInstance();
+    if (!pc) return;
+
+    try {
+      await pc.addIceCandidate(new RTCIceCandidate(candidate));
+    } catch (error) {
+      console.error('Error adding ICE candidate:', error);
+    }
+  }
+
+  close(): void {
+    if (this.peer) {
+      this.peer.close();
+      this.peer = null;
     }
   }
 }
