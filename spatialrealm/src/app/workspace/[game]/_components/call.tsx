@@ -10,14 +10,11 @@ import { IoClose, IoExpand, IoContract } from "react-icons/io5";
 
 export const Call = () => {
   const { 
-    localStream, 
-    remoteStreams, 
-    isConnected, 
-    error, 
-    peerId, 
-    isInPrivateArea, 
-    currentAreaId, 
-    encryptionKey,
+    localStream,
+    remoteStreams,
+    isConnected,
+    error,
+    peerId,
     isScreenSharing,
     startScreenShare,
     stopScreenShare,
@@ -26,12 +23,12 @@ export const Call = () => {
 
   const [isMuted, setIsMuted] = useState(false);
   const [isVideoOff, setIsVideoOff] = useState(false);
-  const [streamMap, setStreamMap] = useState<Map<string, { stream: MediaStream, peerId?: string }>>(new Map());
   const [selectedScreenShare, setSelectedScreenShare] = useState<{ stream: MediaStream; peerId: string; isOwn: boolean } | null>(null);
-  const [isModalFullscreen, setIsModalFullscreen] = useState(true); // Start in fullscreen
+  const [isModalFullscreen, setIsModalFullscreen] = useState(true);
   const [showScreenShareNotification, setShowScreenShareNotification] = useState(false);
   const [availableScreenShares, setAvailableScreenShares] = useState<Array<{ stream: MediaStream; peerId: string; isOwn: boolean }>>([]);
 
+  // Audio/Video controls
   const toggleMute = () => {
     if (!localStream) return;
     const audioTrack = localStream.getAudioTracks()[0];
@@ -62,9 +59,10 @@ export const Call = () => {
     }
   };
 
+  // Screen share modal controls
   const openScreenShareModal = useCallback((screenShare: { stream: MediaStream; peerId: string; isOwn: boolean }) => {
     setSelectedScreenShare(screenShare);
-    setIsModalFullscreen(true); // Always open in fullscreen
+    setIsModalFullscreen(true);
   }, []);
 
   const closeScreenShareModal = useCallback(() => {
@@ -76,30 +74,25 @@ export const Call = () => {
     setIsModalFullscreen(!isModalFullscreen);
   };
 
-  // Better stream management with unique identification
+  // Prepare streams for rendering
   const allStreams = localStream ? [localStream, ...remoteStreams] : remoteStreams;
-  
-  // Filter out any null or undefined streams
   const validStreams = allStreams.filter(stream => stream && stream.active);
 
-  // Convert screen share streams Map to Array for rendering (memoized to prevent re-renders)
+  // Convert screen share streams Map to Array
   const screenShareArray = useMemo(() => {
     return Array.from(screenShareStreams.entries()).map(([peerId, data]) => ({
       ...data
     }));
   }, [screenShareStreams]);
 
-  // Combined effect to handle screen share state changes
+  // Handle screen share state changes
   useEffect(() => {
-    // Convert to array
     const currentScreenShares = Array.from(screenShareStreams.entries()).map(([peerId, data]) => ({
-          ...data
+      ...data
     }));
     
-    // Update available screen shares
     setAvailableScreenShares(currentScreenShares);
     
-    // Find own and other shares
     const ownScreenShare = currentScreenShares.find(share => share.isOwn);
     const otherScreenShares = currentScreenShares.filter(share => !share.isOwn);
     const hasOwnShare = ownScreenShare !== undefined;
@@ -129,6 +122,7 @@ export const Call = () => {
     }
   }, [screenShareStreams, selectedScreenShare?.peerId, selectedScreenShare?.isOwn]);
 
+  // Error state
   if (error) {
     return (
       <div className="fixed top-4 left-4 w-[calc(100vw-320px-48px)] h-[25vh] bg-red-100 rounded-xl shadow-2xl overflow-hidden border border-red-200 p-4 flex items-center justify-center">
@@ -140,6 +134,7 @@ export const Call = () => {
     );
   }
 
+  // Connecting state
   if (!isConnected) {
     return (
       <div className="fixed top-4 left-4 w-[calc(100vw-320px-48px)] h-[25vh] bg-blue-100 rounded-xl shadow-2xl overflow-hidden border border-blue-200 p-4 flex items-center justify-center">
@@ -196,10 +191,10 @@ export const Call = () => {
         </div>
       )}
       
-      {/* Screen Share Modal with Blurred Background */}
+      {/* Screen Share Modal */}
       {selectedScreenShare && (
         <div className="fixed inset-0 z-50 flex items-center justify-center">
-          {/* Blurred Background Overlay */}
+          {/* Background Overlay */}
           <div 
             className="fixed inset-0 bg-black/70 backdrop-blur-lg transition-all duration-300"
             onClick={closeScreenShareModal}
@@ -215,9 +210,6 @@ export const Call = () => {
                   <span className="font-semibold">
                     {selectedScreenShare.isOwn ? "Your Screen Share" : `${selectedScreenShare.peerId}'s Screen Share`}
                   </span>
-                  {isInPrivateArea && (
-                    <span className="bg-purple-600 px-2 py-1 rounded text-xs">🔐 Private</span>
-                  )}
                 </div>
                 
                 <div className="flex items-center gap-2">
@@ -375,9 +367,6 @@ export const Call = () => {
                     {isVideoOff ? <BsFillCameraVideoOffFill size={14} /> : <BsFillCameraVideoFill size={14} />}
                     {isVideoOff ? 'Camera Off' : 'Camera On'}
                   </span>
-                  {isInPrivateArea && (
-                    <span className="bg-purple-600 px-2 py-1 rounded text-xs">🔐 Private Area</span>
-                  )}
                 </div>
               </div>
             </div>
@@ -391,9 +380,6 @@ export const Call = () => {
           <div className="absolute top-2 left-2 bg-blue-600 text-white text-xs px-2 py-1 rounded flex items-center gap-1 z-10">
             <HiDesktopComputer size={12} />
             <span>Screen Share</span>
-            {isInPrivateArea && (
-              <span className="bg-purple-600 px-1 rounded">🔐 Private</span>
-            )}
           </div>
           
           <div className="grid grid-cols-1 md:grid-cols-2 gap-2 w-full h-full p-2">
@@ -407,7 +393,7 @@ export const Call = () => {
                   ref={(el) => {
                     if (el && screenShare.stream && screenShare.stream.active) {
                       el.srcObject = screenShare.stream;
-                      el.muted = true; // Screen shares should be muted to avoid feedback
+                      el.muted = true;
                       el.autoplay = true;
                       el.playsInline = true;
                     }
@@ -447,124 +433,104 @@ export const Call = () => {
       
       {/* Video Call Display */}
       <div className={`fixed top-4 left-4 w-[calc(100vw-320px-48px)] ${screenShareArray.length > 0 ? 'h-[25vh] mt-[52vh]' : 'h-[25vh]'} bg-gray-900 rounded-xl shadow-2xl overflow-hidden border border-gray-700`}>
-      {validStreams.length === 0 ? (
-        <div className="w-full h-full flex items-center justify-center text-white">
-          <div className="text-center">
-            <div className="w-16 h-16 bg-gray-700 rounded-full flex items-center justify-center mx-auto mb-2">
-              <svg className="w-8 h-8" fill="currentColor" viewBox="0 0 24 24">
-                <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/>
-              </svg>
-            </div>
-            <p className="text-sm">Waiting for video...</p>
-            <p className="text-xs text-gray-400 mt-1">ID: {peerId}</p>
-          </div>
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2 w-full h-full p-2">
-          {validStreams.map((stream, idx) => (
-            <div
-              key={`${stream.id}-${idx}`}
-              className="relative bg-gray-800 rounded-lg overflow-hidden group"
-            >
-              <video
-                ref={(el) => {
-                  if (el && stream && stream.active) {
-                    el.srcObject = stream;
-                    el.muted = idx === 0;
-                    el.autoplay = true;
-                    el.playsInline = true;
-                    
-                    // Handle stream ended event
-                    const handleStreamEnded = () => {
-                      console.log('Stream ended:', stream.id);
-                      el.srcObject = null;
-                    };
-                    
-                    stream.addEventListener('inactive', handleStreamEnded);
-                    
-                    return () => {
-                      stream.removeEventListener('inactive', handleStreamEnded);
-                    };
-                  }
-                }}
-                className="w-full h-full object-cover"
-              />
-
-              {/* Bottom Label */}
-              <div className="absolute bottom-2 left-2 bg-black/50 text-white text-xs px-2 py-1 rounded">
-                {idx === 0 ? "You" : `User ${idx}`}
+        {validStreams.length === 0 ? (
+          <div className="w-full h-full flex items-center justify-center text-white">
+            <div className="text-center">
+              <div className="w-16 h-16 bg-gray-700 rounded-full flex items-center justify-center mx-auto mb-2">
+                <svg className="w-8 h-8" fill="currentColor" viewBox="0 0 24 24">
+                  <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/>
+                </svg>
               </div>
-
-              {/* Top Left Label for Local */}
-              {idx === 0 && (
-                <>
-                  <div className="absolute top-2 left-2 bg-green-500 text-white text-xs px-2 py-1 rounded">
-                    LOCAL
-                  </div>
-
-                  {/* Hover Controls with Icons */}
-                  <div className="absolute top-2 right-2 hidden group-hover:flex flex-col gap-2 transition duration-200 ease-in-out">
-                    <button
-                      onClick={toggleMute}
-                      className={`p-2 rounded-full ${
-                        isMuted ? "bg-red-600" : "bg-green-600"
-                      } text-white hover:scale-105`}
-                      title={isMuted ? "Unmute" : "Mute"}
-                    >
-                      {isMuted ? <BsMicMuteFill size={18} /> : <FaMicrophone size={18} />}
-                    </button>
-                    <button
-                      onClick={toggleVideo}
-                      className={`p-2 rounded-full ${
-                        isVideoOff ? "bg-red-600" : "bg-green-600"
-                      } text-white hover:scale-105`}
-                      title={isVideoOff ? "Turn Camera On" : "Turn Camera Off"}
-                    >
-                      {isVideoOff ? (
-                        <BsFillCameraVideoOffFill size={18} />
-                      ) : (
-                        <BsFillCameraVideoFill size={18} />
-                      )}
-                    </button>
-                    <button
-                      onClick={handleScreenShare}
-                      className={`p-2 rounded-full ${
-                        isScreenSharing ? "bg-blue-600" : "bg-gray-600"
-                      } text-white hover:scale-105`}
-                      title={isScreenSharing ? "Stop Screen Share" : "Share Screen"}
-                    >
-                      <HiDesktopComputer size={18} />
-                    </button>
-                  </div>
-                </>
-              )}
+              <p className="text-sm">Waiting for video...</p>
+              <p className="text-xs text-gray-400 mt-1">ID: {peerId}</p>
             </div>
-          ))}
-        </div>
-      )}
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2 w-full h-full p-2">
+            {validStreams.map((stream, idx) => (
+              <div
+                key={`${stream.id}-${idx}`}
+                className="relative bg-gray-800 rounded-lg overflow-hidden group"
+              >
+                <video
+                  ref={(el) => {
+                    if (el && stream && stream.active) {
+                      el.srcObject = stream;
+                      el.muted = idx === 0; // Mute local stream to avoid feedback
+                      el.autoplay = true;
+                      el.playsInline = true;
+                    }
+                  }}
+                  className="w-full h-full object-cover"
+                />
 
-      <div className="absolute top-2 right-2 flex flex-col items-end gap-1">
-        <div className="bg-black/50 text-white text-xs px-2 py-1 rounded">
-          {validStreams.length} participant{validStreams.length !== 1 ? "s" : ""}
-          {screenShareArray.length > 0 && ` | ${screenShareArray.length} screen${screenShareArray.length !== 1 ? "s" : ""}`}
+                {/* Bottom Label */}
+                <div className="absolute bottom-2 left-2 bg-black/50 text-white text-xs px-2 py-1 rounded">
+                  {idx === 0 ? "You" : `User ${idx}`}
+                </div>
+
+                {/* Local stream controls */}
+                {idx === 0 && (
+                  <>
+                    <div className="absolute top-2 left-2 bg-green-500 text-white text-xs px-2 py-1 rounded">
+                      LOCAL
+                    </div>
+
+                    {/* Hover Controls */}
+                    <div className="absolute top-2 right-2 hidden group-hover:flex flex-col gap-2 transition duration-200 ease-in-out">
+                      <button
+                        onClick={toggleMute}
+                        className={`p-2 rounded-full ${
+                          isMuted ? "bg-red-600" : "bg-green-600"
+                        } text-white hover:scale-105`}
+                        title={isMuted ? "Unmute" : "Mute"}
+                      >
+                        {isMuted ? <BsMicMuteFill size={18} /> : <FaMicrophone size={18} />}
+                      </button>
+                      
+                      <button
+                        onClick={toggleVideo}
+                        className={`p-2 rounded-full ${
+                          isVideoOff ? "bg-red-600" : "bg-green-600"
+                        } text-white hover:scale-105`}
+                        title={isVideoOff ? "Turn Camera On" : "Turn Camera Off"}
+                      >
+                        {isVideoOff ? (
+                          <BsFillCameraVideoOffFill size={18} />
+                        ) : (
+                          <BsFillCameraVideoFill size={18} />
+                        )}
+                      </button>
+                      
+                      <button
+                        onClick={handleScreenShare}
+                        className={`p-2 rounded-full ${
+                          isScreenSharing ? "bg-blue-600" : "bg-gray-600"
+                        } text-white hover:scale-105`}
+                        title={isScreenSharing ? "Stop Screen Share" : "Share Screen"}
+                      >
+                        <HiDesktopComputer size={18} />
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Status Display */}
+        <div className="absolute top-2 right-2 flex flex-col items-end gap-1">
+          <div className="bg-black/50 text-white text-xs px-2 py-1 rounded">
+            {validStreams.length} participant{validStreams.length !== 1 ? "s" : ""}
+            {screenShareArray.length > 0 && ` | ${screenShareArray.length} screen${screenShareArray.length !== 1 ? "s" : ""}`}
+          </div>
+          {isScreenSharing && (
+            <div className="bg-blue-600 text-white text-xs px-1 py-0.5 rounded">
+              🖥️ Sharing
+            </div>
+          )}
         </div>
-        {isInPrivateArea && (
-          <div className="bg-purple-600 text-white text-xs px-2 py-1 rounded flex items-center gap-1">
-            <span>🔐</span>
-            <span>Private Area {currentAreaId}</span>
-          </div>
-        )}
-        {encryptionKey && (
-          <div className="bg-green-600 text-white text-xs px-1 py-0.5 rounded">
-            🛡️ Encrypted
-          </div>
-        )}
-        {isScreenSharing && (
-          <div className="bg-blue-600 text-white text-xs px-1 py-0.5 rounded">
-            🖥️ Sharing
-          </div>
-        )}
-      </div>
       </div>
     </>
   );
