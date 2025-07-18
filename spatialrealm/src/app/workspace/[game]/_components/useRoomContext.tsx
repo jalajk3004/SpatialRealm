@@ -119,7 +119,7 @@ export const RoomProvider = ({ children }: { children: ReactNode }) => {
         host: process.env.NEXT_PUBLIC_PEER_HOST,
         port: parseInt(process.env.NEXT_PUBLIC_PEER_PORT || "443"),
         path: "/peerjs",
-        secure: process.env.NODE_ENV === "production",
+        secure: true,
         debug: 0,
         config: {
           iceServers: [
@@ -235,7 +235,7 @@ export const RoomProvider = ({ children }: { children: ReactNode }) => {
         host: process.env.NEXT_PUBLIC_PEER_HOST,
         port: parseInt(process.env.NEXT_PUBLIC_PEER_PORT || "443"),
         path: "/peerjs",
-        secure: process.env.NODE_ENV === "production",
+        secure: true,
         debug: 0,
         config: {
           iceServers: [
