@@ -23,13 +23,13 @@ class SocketClient {
     }
 
     // Create new socket with auth
-    this.socket = io(`${process.env.BACKEND_URL}`||"https://spatialrealm.onrender.com/", {
-      transports: ["websocket"],
-      auth: {
-        userId: userId
-      },
-      autoConnect: true
-    });
+      this.socket = io(`${process.env.NEXT_PUBLIC_BACKEND_URL}` || "https://spatialrealm.onrender.com", {
+        transports: ["websocket"],
+        auth: {
+          userId: userId
+        },
+        autoConnect: true
+      });
 
     this.socket.on('connect', () => {
       console.log('✅ Socket connected:', this.socket?.id);
